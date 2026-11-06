@@ -1,6 +1,6 @@
 {
   "name": "kindle-monitor",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "packageManager": "pnpm@10.20.0",
   "description": "Editable PC hardware monitor for Kindle PW5 over USBNetwork",

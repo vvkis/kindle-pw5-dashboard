@@ -100,7 +100,8 @@ app.whenReady().then(async()=>{
     const result=await dialog.showSaveDialog(window,{title:'导出 Kindle 灰阶图片',defaultPath:path.join(DATA,'dashboard-export.png'),filters:[{name:'PNG',extensions:['png']}]});
     if(result.canceled)return null;
     const image=await renderPng();if(path.resolve(result.filePath)!==path.resolve(image))await fs.copyFile(image,result.filePath);
-    log('已导出 1236×1648 灰阶 PNG');return result.filePath;
+    const page=require('./widgets.cjs').screen(config.orientation);
+    log(`已导出 ${page.width}×${page.height} 灰阶 PNG`);return result.filePath;
   });
   await window.loadFile(path.join(__dirname,'ui','index.html'));
   log('应用已启动，自动推送默认关闭');
@@ -139,12 +140,23 @@ app.whenReady().then(async()=>{
     await fs.writeFile(path.join(DATA,'app-preview.png'),(await window.webContents.capturePage()).toPNG());
     const check=await window.webContents.executeJavaScript(`({cards:document.querySelectorAll('.metric-tile').length,font:getComputedStyle(document.body).fontFamily,preview:document.querySelector('#kindle-preview svg')?.getAttribute('width'),bridge:!!window.kindle,node:typeof require})`);
     await fs.writeFile(path.join(DATA,'smoke-result.json'),JSON.stringify(check,null,2));
-    if(check.cards!==8||!check.bridge||check.node!=='undefined'||check.preview!=='1236')throw new Error('UI smoke check failed: '+JSON.stringify(check));
+    if(check.cards!==8||!check.bridge||check.node!=='undefined'||check.preview!==String(require('./widgets.cjs').screen(config.orientation).width))throw new Error('UI smoke check failed: '+JSON.stringify(check));
     const editor=await window.webContents.executeJavaScript(`document.querySelector('.nav[data-tab="editor"]').click();({widgets:document.querySelectorAll('.widget-hit').length,inspector:!document.querySelector('#widget-inspector').classList.contains('hidden'),errors:document.querySelector('#toast').textContent})`);
     if(editor.widgets!==config.widgets.length||!editor.inspector)throw new Error('Widget editor failed');
     await window.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
     await fs.writeFile(path.join(DATA,'editor-preview.png'),(await window.webContents.capturePage()).toPNG());
     await fs.writeFile(path.join(DATA,'smoke-editor.json'),JSON.stringify(editor,null,2));
+    const orientationChecks=[];
+    for(const orientation of ['portrait','landscape']){
+      const dimensions=require('./widgets.cjs').screen(orientation);
+      const view=await window.webContents.executeJavaScript(`document.querySelector('#orientation').value=${JSON.stringify(orientation)};document.querySelector('#orientation').dispatchEvent(new Event('change'));({width:document.querySelector('#kindle-preview svg').getAttribute('width'),height:document.querySelector('#kindle-preview svg').getAttribute('height'),aspect:document.querySelector('#kindle-preview').style.aspectRatio,widgets:document.querySelectorAll('.widget-hit').length})`);
+      if(view.width!==String(dimensions.width)||view.height!==String(dimensions.height)||view.widgets!==config.layouts[orientation].length)throw new Error('Orientation editor failed: '+JSON.stringify(view));
+      await window.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+      await fs.writeFile(path.join(DATA,`editor-${orientation}.png`),(await window.webContents.capturePage()).toPNG());
+      await Raster.renderPng({...config,orientation,widgets:config.layouts[orientation]},sample,history,path.join(RESOURCE,'fonts'),path.join(DATA,`dashboard-${orientation}.png`),weather.value);
+      orientationChecks.push({orientation,...view});
+    }
+    await fs.writeFile(path.join(DATA,'smoke-orientations.json'),JSON.stringify(orientationChecks,null,2));
     console.log('SMOKE PASS',JSON.stringify(check));app.quit();
   }
 }).catch(error=>{console.error(error);app.exit(1);});

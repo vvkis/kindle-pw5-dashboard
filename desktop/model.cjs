@@ -18,6 +18,8 @@
     cpuSensor: '', layout: 'cards', showChart: true,
     weather: { name: '广州', latitude: 23.1291, longitude: 113.2644, enabled: true },
     widgets: Widgets.defaults(),
+    orientation: 'portrait', landscapeTop: 'left',
+    layouts: {portrait:Widgets.defaults(),landscape:Widgets.defaults('landscape')},
     metrics: ['cpuTemp','gpuTemp','cpuLoad','gpuLoad','memoryLoad','gpuMemoryLoad'].map(key => ({ key, label: METRICS[key].label, enabled: true }))
   });
   function sanitize(input) {
@@ -38,7 +40,14 @@
     }
     out.layout = input.layout === 'rows' ? 'rows' : 'cards';
     out.showChart = input.showChart !== false;
-    if(input.widgets!==undefined)out.widgets=Widgets.validate(input.widgets);
+    if(input.orientation!==undefined&&!['portrait','landscape'].includes(input.orientation))throw new Error('无效的屏幕方向');
+    if(input.landscapeTop!==undefined&&!['left','right'].includes(input.landscapeTop))throw new Error('无效的横屏摆放方向');
+    out.orientation=input.orientation||'portrait';out.landscapeTop=input.landscapeTop||'left';
+    for(const orientation of ['portrait','landscape']){
+      if(input.layouts?.[orientation]!==undefined)out.layouts[orientation]=Widgets.validate(input.layouts[orientation],orientation);
+    }
+    out.widgets=input.widgets!==undefined?Widgets.validate(input.widgets,out.orientation):out.layouts[out.orientation];
+    out.layouts[out.orientation]=out.widgets.map(widget=>({...widget}));
     if(input.weather) {
       const w=input.weather;
       if(!Number.isFinite(Number(w.latitude))||Math.abs(Number(w.latitude))>90||!Number.isFinite(Number(w.longitude))||Math.abs(Number(w.longitude))>180)throw new Error('天气坐标无效');

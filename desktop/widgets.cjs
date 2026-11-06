@@ -1,7 +1,20 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory();else root.DesktopWidgets=factory();})(typeof globalThis==='object'?globalThis:this,function(){
  const TYPES={calendar:'日历',clock:'时间与日期',weather:'天气',cpuTemp:'CPU 温度',gpuTemp:'GPU 温度',cpuLoad:'CPU 占用',gpuLoad:'显卡占用',memoryLoad:'内存占用',gpuMemoryLoad:'显存占用',memoryUsed:'已用内存',gpuPower:'显卡功耗',system:'系统概览',trend:'温度趋势',note:'文字便签'};
  const GRID={columns:4,rows:6,x:64,y:134,width:1108,height:1356,gap:20};
- const defaults=()=>[
+ function screen(orientation='portrait'){
+  return orientation==='landscape'?{width:1648,height:1236,grid:{columns:6,rows:4,x:64,y:118,width:1520,height:972,gap:20}}:{width:1236,height:1648,grid:GRID};
+ }
+ const defaults=(orientation='portrait')=>orientation==='landscape'?[
+  {id:'clock',type:'clock',label:'时间与日期',x:0,y:0,w:2,h:2},
+  {id:'weather',type:'weather',label:'天气',x:2,y:0,w:2,h:1},
+  {id:'calendar',type:'calendar',label:'日历',x:2,y:1,w:1,h:1},
+  {id:'note',type:'note',label:'今日便签',x:3,y:1,w:1,h:1},
+  {id:'cpu',type:'cpuTemp',label:'CPU 温度',x:4,y:0,w:2,h:2},
+  {id:'gpu',type:'gpuTemp',label:'GPU 温度',x:0,y:2,w:2,h:1},
+  {id:'memory',type:'memoryLoad',label:'内存占用',x:0,y:3,w:2,h:1},
+  {id:'system',type:'system',label:'系统概览',x:2,y:2,w:2,h:2},
+  {id:'trend',type:'trend',label:'温度趋势',x:4,y:2,w:2,h:2}
+ ]:[
   {id:'clock',type:'clock',label:'时间与日期',x:0,y:0,w:2,h:2},
   {id:'weather',type:'weather',label:'天气',x:2,y:0,w:2,h:1},
   {id:'calendar',type:'calendar',label:'日历',x:2,y:1,w:1,h:1},
@@ -13,30 +26,31 @@
   {id:'trend',type:'trend',label:'温度趋势',x:2,y:4,w:2,h:2}
  ];
  const intersects=(a,b)=>a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;
- function validate(widgets){
+ function validate(widgets,orientation='portrait'){
+  const grid=screen(orientation).grid;
   if(!Array.isArray(widgets)||widgets.length>24)throw new Error('桌面最多支持 24 个组件');
   const ids=new Set();
   const out=widgets.map(w=>{
    if(!w||!TYPES[w.type]||typeof w.id!=='string'||!/^[a-zA-Z0-9_-]{1,60}$/.test(w.id)||ids.has(w.id))throw new Error('组件类型或标识无效');
    ids.add(w.id);
    for(const key of ['x','y','w','h'])if(!Number.isInteger(w[key]))throw new Error('组件需对齐网格');
-   if(w.x<0||w.y<0||w.w<1||w.h<1||w.x+w.w>4||w.y+w.h>6)throw new Error('组件超出桌面范围');
+   if(w.x<0||w.y<0||w.w<1||w.h<1||w.x+w.w>grid.columns||w.y+w.h>grid.rows)throw new Error('组件超出桌面范围');
    return {id:w.id,type:w.type,label:String(w.label||TYPES[w.type]).slice(0,20),x:w.x,y:w.y,w:w.w,h:w.h};
   });
   for(let i=0;i<out.length;i++)for(let j=i+1;j<out.length;j++)if(intersects(out[i],out[j]))throw new Error('组件不能重叠');
   return out;
  }
- function rect(widget){const cw=(GRID.width-GRID.gap*3)/4,ch=(GRID.height-GRID.gap*5)/6;return{x:GRID.x+widget.x*(cw+GRID.gap),y:GRID.y+widget.y*(ch+GRID.gap),width:widget.w*cw+(widget.w-1)*GRID.gap,height:widget.h*ch+(widget.h-1)*GRID.gap};}
- function move(widgets,id,x,y){
+ function rect(widget,orientation='portrait'){const grid=screen(orientation).grid,cw=(grid.width-grid.gap*(grid.columns-1))/grid.columns,ch=(grid.height-grid.gap*(grid.rows-1))/grid.rows;return{x:grid.x+widget.x*(cw+grid.gap),y:grid.y+widget.y*(ch+grid.gap),width:widget.w*cw+(widget.w-1)*grid.gap,height:widget.h*ch+(widget.h-1)*grid.gap};}
+ function move(widgets,id,x,y,orientation='portrait'){
   const copy=widgets.map(w=>({...w})),widget=copy.find(w=>w.id===id);if(!widget)throw new Error('组件不存在');
   const old={...widget};widget.x=x;widget.y=y;
   const hits=copy.filter(w=>w.id!==id&&intersects(w,widget));
   if(hits.length&&hits.every(hit=>hit.x>=x&&hit.y>=y&&hit.x+hit.w<=x+widget.w&&hit.y+hit.h<=y+widget.h)){
    for(const hit of hits){hit.x=old.x+hit.x-x;hit.y=old.y+hit.y-y;}
   }
-  return validate(copy);
+  return validate(copy,orientation);
  }
- function findSpace(widgets,w,h){for(let y=0;y<=6-h;y++)for(let x=0;x<=4-w;x++)if(!widgets.some(a=>intersects(a,{x,y,w,h})))return{x,y};return null;}
+ function findSpace(widgets,w,h,orientation='portrait'){const grid=screen(orientation).grid;for(let y=0;y<=grid.rows-h;y++)for(let x=0;x<=grid.columns-w;x++)if(!widgets.some(a=>intersects(a,{x,y,w,h})))return{x,y};return null;}
  const esc=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
  const fmt=v=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(v>=100?0:1).replace(/\.0$/,''):'—';
  function text(x,y,value,size=24,extra='',maxWidth=1108){
@@ -49,15 +63,16 @@
   return pieces.filter(p=>p.length>1).map(p=>`<polyline points="${p.join(' ')}" fill="none" stroke="#111" stroke-width="3"/>`).join('');
  }
  function svg(config,sample,history=[],weather=null){
+  const page=screen(config.orientation);
   const at=new Date(sample?.at||Date.now()),values=sample?.values||{},week=['日','一','二','三','四','五','六'][at.getDay()];
   const englishDay=['SUNDAY','MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY'][at.getDay()];
   const rounded=(x,y,w,h,fill='#fff',stroke='none',radius=22)=>`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${radius}" fill="${fill}" stroke="${stroke}" stroke-width="2"/>`;
   const rule=(x,y,w,color='#c6c6c6')=>`<path d="M${x} ${y}h${w}" stroke="${color}" fill="none"/>`;
   const sun=(x,y,r,color='#fff')=>{let out=`<circle cx="${x}" cy="${y}" r="${r*.43}" fill="none" stroke="${color}" stroke-width="3"/>`;for(let i=0;i<8;i++){const a=i*Math.PI/4;out+=`<path d="M${x+Math.cos(a)*r*.7} ${y+Math.sin(a)*r*.7}L${x+Math.cos(a)*r} ${y+Math.sin(a)*r}" stroke="${color}" stroke-width="3" stroke-linecap="round"/>`;}return out;};
-  let body='<rect width="1236" height="1648" fill="#fff"/><g fill="#161616" font-family="Maple Mono NF CN,monospace">';
-  body+=text(64,76,config.title,25,'',850)+text(980,76,'DESK / 01',18);
-  for(const widget of validate(config.widgets||defaults())){
-   const r=rect(widget),x=r.x,y=r.y,w=r.width,h=r.height,compact=h<260,narrow=w<400,pad=narrow?20:30;
+  let body=`<rect width="${page.width}" height="${page.height}" fill="#fff"/><g fill="#161616" font-family="Maple Mono NF CN,monospace">`;
+  body+=text(64,76,config.title,25,'',850)+text(page.width-256,76,'DESK / 01',18);
+  for(const widget of validate(config.widgets||defaults(config.orientation),config.orientation)){
+   const r=rect(widget,config.orientation),x=r.x,y=r.y,w=r.width,h=r.height,compact=h<260,narrow=w<400,pad=narrow?20:30;
    if(widget.type==='clock'){
     body+=text(x+8,y+45,englishDay,23,'letter-spacing="3"',w-20);
     if(!narrow){const cx=x+w-55,cy=y+34,rad=25;const ah=(at.getHours()%12+at.getMinutes()/60)*Math.PI/6-Math.PI/2,am=at.getMinutes()*Math.PI/30-Math.PI/2;body+=`<circle cx="${cx}" cy="${cy}" r="${rad}" stroke="#111" fill="none" stroke-width="2"/><path d="M${cx+Math.cos(ah)*15} ${cy+Math.sin(ah)*15}L${cx} ${cy}L${cx+Math.cos(am)*20} ${cy+Math.sin(am)*20}" fill="none" stroke="#111" stroke-width="3" stroke-linecap="round"/>`;}
@@ -121,10 +136,10 @@
     body+=rounded(x,y,w,h,'#f7f7f7')+text(x+pad,y+40,widget.label,21,'',w-pad*2)+text(x+pad,y+h*.68,`${fmt(value)}${value==null?'':unit}`,narrow?44:66,'font-weight="bold"',w-pad*2);
    }
   }
-  body+=text(64,1545,config.note,20,'',850);
-  body+='<path d="M64 1572H1172" stroke="#222" stroke-width="2"/>';
-  body+=text(64,1611,`${sample?.hostname||'LOCAL PC'} · ${at.toLocaleTimeString('zh-CN',{hour12:false})}`,18,'',700)+text(800,1611,'天气 / Open-Meteo',14)+text(1078,1611,'PW5',18);
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="1236" height="1648" viewBox="0 0 1236 1648">${body}</g></svg>`;
+  body+=text(64,page.height-103,config.note,20,'',page.width-386);
+  body+=`<path d="M64 ${page.height-76}H${page.width-64}" stroke="#222" stroke-width="2"/>`;
+  body+=text(64,page.height-37,`${sample?.hostname||'LOCAL PC'} · ${at.toLocaleTimeString('zh-CN',{hour12:false})}`,18,'',page.width-536)+text(page.width-436,page.height-37,'天气 / Open-Meteo',14)+text(page.width-158,page.height-37,'PW5',18);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${page.width}" height="${page.height}" viewBox="0 0 ${page.width} ${page.height}">${body}</g></svg>`;
  }
- return{TYPES,GRID,defaults,validate,rect,move,findSpace,svg};
+ return{TYPES,GRID,screen,defaults,validate,rect,move,findSpace,svg};
 });

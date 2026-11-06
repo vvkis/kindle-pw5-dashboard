@@ -5,7 +5,7 @@ const path=require('node:path');
 const {PNG}=require('pngjs');
 const M=require('../desktop/model.cjs'),W=require('../desktop/widgets.cjs');
 const {parseNvidia,selectCpuSensor,Sensors}=require('../desktop/sensors.cjs');
-const {Transport,argsFor}=require('../desktop/transport.cjs');
+const {Transport,argsFor,deviceImage}=require('../desktop/transport.cjs');
 const Raster=require('../desktop/render.cjs');
 const {conditions}=require('../desktop/weather.cjs');
 const ROOT=path.resolve(__dirname,'..');
@@ -63,3 +63,54 @@ test('raster export is full-size grayscale, contains footer, and failed SCP neve
  }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
 test('weather code mapping covers clear, rain and thunderstorm',()=>{assert.equal(conditions(0),'晴');assert.equal(conditions(81),'阵雨');assert.equal(conditions(95),'雷雨');});
+test('orientation-specific layouts survive switching and old configurations remain portrait',()=>{
+ const legacy=M.defaults();delete legacy.orientation;delete legacy.layouts;
+ assert.equal(M.sanitize(legacy).orientation,'portrait');
+ let config=M.defaults();config.widgets[0].label='我的时钟';config=M.sanitize(config);
+ const landscape=M.sanitize({...config,orientation:'landscape',widgets:config.layouts.landscape});
+ landscape.widgets.find(w=>w.id==='cpu').label='横屏 CPU';
+ const saved=M.sanitize(JSON.parse(JSON.stringify(landscape)));
+ assert.equal(saved.layouts.portrait[0].label,'我的时钟');
+ assert.equal(saved.layouts.landscape.find(w=>w.id==='cpu').label,'横屏 CPU');
+ const portrait=M.sanitize({...saved,orientation:'portrait',widgets:saved.layouts.portrait});
+ assert.equal(portrait.widgets[0].label,'我的时钟');
+ assert.equal(portrait.layouts.landscape.find(w=>w.id==='cpu').label,'横屏 CPU');
+ assert.throws(()=>M.sanitize({...portrait,orientation:'upside-down'}));
+ assert.throws(()=>M.sanitize({...portrait,landscapeTop:'up'}));
+});
+test('landscape grid supports placement, swapping, and full-width widgets without overflow',()=>{
+ const widgets=W.defaults('landscape'),page=W.screen('landscape');
+ assert.equal(page.grid.columns,6);assert.equal(page.grid.rows,4);
+ W.validate(widgets,'landscape');
+ for(const w of widgets){const r=W.rect(w,'landscape');assert.ok(r.x+r.width<=page.width-64+.01);assert.ok(r.y+r.height<=page.height-146+.01);}
+ const moved=W.move(widgets,'clock',4,0,'landscape');assert.equal(moved.find(w=>w.id==='cpu').x,0);
+ assert.throws(()=>W.move(widgets,'cpu',5,0,'landscape'));
+ assert.throws(()=>W.move(widgets,'clock',0,3,'landscape'));
+ assert.deepEqual(W.findSpace([],6,1,'landscape'),{x:0,y:0});
+ assert.equal(W.findSpace([],6,1,'portrait'),null);
+});
+test('landscape rendering is complete, grayscale, and transport rotates correctly for both placements',async()=>{
+ const dir=await fs.mkdtemp(path.join(ROOT,'out','landscape-test-'));
+ try{
+  const config=M.sanitize({orientation:'landscape'}),file=path.join(dir,'landscape.png');
+  await Raster.renderPng(config,{at:'2026-11-06T10:00:00Z',values:{gpuTemp:37,cpuTemp:55}},[],path.join(ROOT,'vendor/fonts'),file);
+  const buffer=await fs.readFile(file),image=PNG.sync.read(buffer);
+  assert.equal(image.width,1648);assert.equal(image.height,1236);assert.equal(buffer[25],0);
+  assert.ok(image.data[(1160*1648+500)*4]<100,'landscape footer must not be cropped');
+  assert.throws(()=>deviceImage(buffer,M.defaults()),/1236×1648/);
+  const corners=new PNG({width:1648,height:1236});corners.data.fill(255);
+  for(const [x,y,v]of [[0,0,11],[1647,0,22],[0,1235,33],[1647,1235,44]])for(let c=0;c<3;c++)corners.data[(y*1648+x)*4+c]=v;
+  const source=PNG.sync.write(corners,{colorType:0,inputColorType:6,bitDepth:8});
+  for(const [top,expected]of [['left',[33,11,44,22]],['right',[22,44,11,33]]]){
+   const encoded=deviceImage(source,{...config,landscapeTop:top}),native=PNG.sync.read(encoded);
+   assert.equal(native.width,1236);assert.equal(native.height,1648);assert.equal(encoded[25],0);
+   const actual=[[0,0],[1235,0],[0,1647],[1235,1647]].map(([x,y])=>native.data[(y*1236+x)*4]);assert.deepEqual(actual,expected);
+  }
+  let received=false;const transport=new Transport(async(file,args,options)=>{
+   if(file.endsWith('scp.exe')){const local=args.find(arg=>arg.startsWith('./'));const sent=PNG.sync.read(await fs.readFile(path.join(options.cwd,local)));assert.equal(sent.width,1236);assert.equal(sent.height,1648);received=true;}
+   return{stdout:''};
+  });
+  await transport.push(config,file);assert.ok(received);
+  assert.ok(!(await fs.readdir(dir)).some(name=>name.startsWith('.kindle-')),'temporary upload snapshot must be removed');
+ }finally{await fs.rm(dir,{recursive:true,force:true});}
+});

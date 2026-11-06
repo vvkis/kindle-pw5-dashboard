@@ -18,18 +18,22 @@ function renderTiles(){
 }
 function updatePreview(){
  if(!state||dragging)return;
- const preview=$('kindle-preview');preview.innerHTML=M.dashboardSvg(draft||state.config,state.sample,state.history,state.weather);
+ const page=W.screen(draft.orientation),grid=page.grid;
+ const preview=$('kindle-preview');preview.style.aspectRatio=page.width+'/'+page.height;
+ const panel=document.querySelector('.preview-panel');panel.classList.toggle('landscape',draft.orientation==='landscape');panel.classList.toggle('landscape-top-right',draft.landscapeTop==='right');
+ $('preview-direction').textContent='PW5 · '+(draft.orientation==='landscape'?'横屏':'竖屏');$('preview-resolution').textContent=page.width+' × '+page.height+' / 灰阶';$('device-resolution').textContent=page.width+' × '+page.height+' · 灰阶墨水屏';
+ preview.innerHTML=M.dashboardSvg(draft||state.config,state.sample,state.history,state.weather);
  if(activeTab!=='editor')return;
  const overlay=document.createElement('div');overlay.className='widget-overlay';
  for(const widget of draft.widgets){
-  const r=W.rect(widget),hit=document.createElement('button');hit.className='widget-hit'+(selected===widget.id?' selected':'');hit.title=widget.label+' · 拖动移动，同尺寸可交换';hit.setAttribute('aria-label','编辑'+widget.label);
-  hit.style.left=r.x/1236*100+'%';hit.style.top=r.y/1648*100+'%';hit.style.width=r.width/1236*100+'%';hit.style.height=r.height/1648*100+'%';
+  const r=W.rect(widget,draft.orientation),hit=document.createElement('button');hit.className='widget-hit'+(selected===widget.id?' selected':'');hit.title=widget.label+' · 拖动移动，同尺寸可交换';hit.setAttribute('aria-label','编辑'+widget.label);
+  hit.style.left=r.x/page.width*100+'%';hit.style.top=r.y/page.height*100+'%';hit.style.width=r.width/page.width*100+'%';hit.style.height=r.height/page.height*100+'%';
   hit.onpointerdown=event=>{
    if(event.button!==0)return;event.preventDefault();selected=widget.id;renderEditor();overlay.querySelectorAll('.widget-hit').forEach(b=>b.classList.toggle('selected',b===hit));
    const x=event.clientX,y=event.clientY,bounds=preview.getBoundingClientRect();dragging=true;hit.setPointerCapture(event.pointerId);
    hit.onpointermove=move=>{hit.style.transform=`translate(${move.clientX-x}px,${move.clientY-y}px)`;};
-   hit.onpointerup=up=>{hit.onpointermove=null;hit.onpointerup=null;dragging=false;const stepX=(W.GRID.width+W.GRID.gap)/4/1236*bounds.width,stepY=(W.GRID.height+W.GRID.gap)/6/1648*bounds.height;
-    try{draft.widgets=W.move(draft.widgets,widget.id,widget.x+Math.round((up.clientX-x)/stepX),widget.y+Math.round((up.clientY-y)/stepY));editing=true;}catch(error){toast(error.message,true);}updatePreview();renderEditor();};
+   hit.onpointerup=up=>{hit.onpointermove=null;hit.onpointerup=null;dragging=false;const stepX=(grid.width+grid.gap)/grid.columns/page.width*bounds.width,stepY=(grid.height+grid.gap)/grid.rows/page.height*bounds.height;
+    try{draft.widgets=W.move(draft.widgets,widget.id,widget.x+Math.round((up.clientX-x)/stepX),widget.y+Math.round((up.clientY-y)/stepY),draft.orientation);editing=true;}catch(error){toast(error.message,true);}updatePreview();renderEditor();};
    hit.onpointercancel=()=>{dragging=false;updatePreview();};
   };overlay.append(hit);
  }preview.append(overlay);
@@ -57,6 +61,7 @@ function fillForms(){
  if(!draft)return;
  for(const id of ['title','note','host','port'])$(id).value=draft[id];
  $('identity-file').value=draft.identityFile;
+ $('orientation').value=draft.orientation;$('landscape-top').value=draft.landscapeTop;$('landscape-placement').classList.toggle('hidden',draft.orientation!=='landscape');
  $('weather-name').value=draft.weather.name;$('latitude').value=draft.weather.latitude;$('longitude').value=draft.weather.longitude;$('show-weather').checked=draft.weather.enabled;
  if(!Array.from($('interval').options).some(o=>Number(o.value)===draft.pushInterval))$('interval').add(new Option(draft.pushInterval+' 秒',draft.pushInterval));
  $('interval').value=draft.pushInterval;
@@ -68,6 +73,7 @@ function renderEditor(){
  if(!draft)return;
  $('widgets-list').replaceChildren(...draft.widgets.map(widget=>{const b=document.createElement('button');b.className='widget-chip'+(widget.id===selected?' selected':'');b.textContent=widget.label;b.onclick=()=>{selected=widget.id;renderEditor();updatePreview();};return b;}));
  const current=draft.widgets.find(w=>w.id===selected);$('widget-inspector').classList.toggle('hidden',!current);
+ for(const option of $('widget-size').options)option.disabled=Number(option.value.split(',')[0])>W.screen(draft.orientation).grid.columns;
  if(current){$('widget-label').value=current.label;$('widget-size').value=current.w+','+current.h;}
 }
 document.querySelectorAll('.nav').forEach(button=>button.onclick=()=>{
@@ -89,11 +95,11 @@ async function saveAll(){
 }
 $('save-editor').onclick=()=>action($('save-editor'),saveAll);$('save-connection').onclick=()=>action($('save-connection'),saveAll);
 $('add-widget').replaceChildren(...Object.entries(W.TYPES).map(([key,label])=>new Option(label,key)));
-$('add').onclick=()=>{const type=$('add-widget').value,space=W.findSpace(draft.widgets,2,1);if(!space){toast('桌面空间不足，请先缩小或移除一个组件');return;}const widget={id:'widget-'+Date.now(),type,label:W.TYPES[type],...space,w:2,h:1};draft.widgets.push(widget);selected=widget.id;editing=true;renderEditor();updatePreview();};
+$('add').onclick=()=>{const type=$('add-widget').value,space=W.findSpace(draft.widgets,2,1,draft.orientation);if(!space){toast('桌面空间不足，请先缩小或移除一个组件');return;}const widget={id:'widget-'+Date.now(),type,label:W.TYPES[type],...space,w:2,h:1};draft.widgets.push(widget);selected=widget.id;editing=true;renderEditor();updatePreview();};
 $('widget-label').oninput=()=>{const widget=draft.widgets.find(w=>w.id===selected);if(!widget)return;widget.label=$('widget-label').value;editing=true;updatePreview();};
-$('widget-size').onchange=()=>{const size=$('widget-size').value.split(',').map(Number);try{draft.widgets=W.validate(draft.widgets.map(w=>w.id===selected?{...w,w:size[0],h:size[1]}:w));editing=true;updatePreview();}catch(error){toast('该大小会重叠或越界，请先腾出空间',true);}renderEditor();};
+$('widget-size').onchange=()=>{const size=$('widget-size').value.split(',').map(Number);try{draft.widgets=W.validate(draft.widgets.map(w=>w.id===selected?{...w,w:size[0],h:size[1]}:w),draft.orientation);editing=true;updatePreview();}catch(error){toast('该大小会重叠或越界，请先腾出空间',true);}renderEditor();};
 $('remove-widget').onclick=()=>{draft.widgets=draft.widgets.filter(w=>w.id!==selected);selected=draft.widgets[0]?.id;editing=true;renderEditor();updatePreview();};
-for(const [id,dx,dy]of [['move-left',-1,0],['move-up',0,-1],['move-down',0,1],['move-right',1,0]])$(id).onclick=()=>{const w=draft.widgets.find(w=>w.id===selected);if(!w)return;try{draft.widgets=W.move(draft.widgets,w.id,w.x+dx,w.y+dy);editing=true;updatePreview();}catch(error){toast(error.message,true);}renderEditor();};
+for(const [id,dx,dy]of [['move-left',-1,0],['move-up',0,-1],['move-down',0,1],['move-right',1,0]])$(id).onclick=()=>{const w=draft.widgets.find(w=>w.id===selected);if(!w)return;try{draft.widgets=W.move(draft.widgets,w.id,w.x+dx,w.y+dy,draft.orientation);editing=true;updatePreview();}catch(error){toast(error.message,true);}renderEditor();};
 $('test').onclick=()=>action($('test'),async()=>{await saveAll();const result=await call('test');$('device-state').textContent='USBNetwork 已连接';$('device-dot').classList.add('connected');toast(result.message);});
 $('push').onclick=()=>action($('push'),async()=>{await saveAll();await call('push');$('device-state').textContent='已成功推送';$('device-dot').classList.add('connected');toast('Kindle 已刷新');});
 $('export').onclick=()=>action($('export'),async()=>{await saveAll();if(await call('export'))toast('PNG 已导出');});
@@ -107,3 +113,13 @@ tickClock();setInterval(tickClock,1000);
 for(const id of ['weather-name','latitude','longitude','show-weather'])$(id).addEventListener('input',()=>{editing=true;try{draft.weather=M.sanitize({...draft,weather:{name:$('weather-name').value,latitude:Number($('latitude').value),longitude:Number($('longitude').value),enabled:$('show-weather').checked}}).weather;updatePreview();}catch{}});
 $('search-weather').onclick=()=>action($('search-weather'),async()=>{cityResults=await call('searchWeather',$('city-search').value);if(!cityResults.length){toast('未找到城市，请尝试英文名，或直接输入坐标');return;}$('city-results').replaceChildren(new Option('选择位置',''),...cityResults.map((r,i)=>new Option(r.name,i)));$('city-results').classList.remove('hidden');});
 $('city-results').onchange=()=>{const selected=cityResults[Number($('city-results').value)];if(!selected||$('city-results').value==='')return;draft.weather={...selected,enabled:true};editing=true;fillForms();updatePreview();};
+
+$('orientation').onchange=()=>{
+ const next=$('orientation').value;if(next===draft.orientation)return;
+ draft.layouts[draft.orientation]=structuredClone(draft.widgets);
+ draft.orientation=next;draft.widgets=structuredClone(draft.layouts[next]);
+ if(!draft.widgets.some(widget=>widget.id===selected))selected=draft.widgets[0]?.id;
+ $('landscape-placement').classList.toggle('hidden',next!=='landscape');
+ editing=true;renderEditor();updatePreview();
+};
+$('landscape-top').onchange=()=>{draft.landscapeTop=$('landscape-top').value;editing=true;updatePreview();};
