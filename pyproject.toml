@@ -1,0 +1,16 @@
+[project]
+name = "kindle-pw5-dashboard"
+version = "0.1.0"
+description = "Offline-first PNG dashboard renderer and Windows USBNetwork push tools for Kindle PW5"
+requires-python = ">=3.11"
+dependencies = ["pillow>=11.0,<13"]
+
+[tool.uv]
+package = false
+cache-dir = ".uv-cache"
+python-downloads = "never"
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
