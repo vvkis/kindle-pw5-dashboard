@@ -19,9 +19,17 @@ Windows 桌面小组件编辑器 + Kindle PW5 电脑状态看板。Electron 桌�
 
 横放时请选择设备原来的顶部朝向左侧或右侧。预览和导出图片保持正常可读的横屏尺寸；USB 推送会把图片旋转到 Kindle 原生 1236 × 1648 像素坐标，适配物理摆放，无需依赖系统自动旋转或改动设备显示设置。左右两种方向均有像素角点和模拟推送测试，真实硬件显示方向仍需设备联调确认。
 
+## 后台省内存
+
+点击窗口右上角「后台省内存」，应用先保存当前设置，再销毁控制面板及其渲染进程。电脑采集、天气更新和已经开启的自动推送继续在后台运行。双击 Windows 托盘图标恢复编辑界面，右键托盘可立即推送、开关自动推送或退出。需要持续同步时，请先打开自动推送；后台按钮不会擅自开启它。普通关闭窗口仍为退出应用。
+
+Maple Mono NF CN 字体和原有横竖屏排版全部保留。PNG 使用临时导出进程，完成后退出以释放字体解析和栅格化内存。默认关闭界面硬件加速，适合当前静态看板；可通过 EXE 的 `--enable-gpu` 参数恢复硬件加速。
+
+本机实测私有内存：前台约 217 MiB，托盘后台约 101 MiB，原生传感器进程另外约 52 MiB。是分别测量的数据，实际占用随硬件和运行状态变化；瞬时导出会短暂增加一个进程。详见性能文档。
+
 ## 温度与真实数据
 
-CPU 占用和物理内存使用由系统读取；NVIDIA 默认通过驱动的 nvidia-smi 查询。启动「启用 CPU 温度」会请求一次 Windows 管理员确认，以启动随包内置的 LibreHardwareMonitor 采集器。桌面界面本身保持普通权限。
+CPU 占用和物理内存使用由系统读取；NVIDIA 默认通过驱动的 nvidia-smi 查询。启动「启用 CPU 温度」会请求一次 Windows 管理员确认，以启动随包内置的原生 .NET / LibreHardwareMonitor 采集器。桌面界面本身保持普通权限。
 
 采集器只启用 CPU/GPU，不扫描主板、硬盘或 SPD。运行时自动使用常驻采集器的数据，避免每轮启动 PowerShell；NVIDIA 与 AMD 核显共存时优先选择 NVIDIA 独显。无传感器、超时、无效的 0°C 数据明确显示不可用。不同硬件和 Windows 驱动策略可能影响 CPU 温度读取，需在本机授权后验证，不能保证所有型号。
 
@@ -44,7 +52,7 @@ CPU 占用和物理内存使用由系统读取；NVIDIA 默认通过驱动的 nv
 
 ## 本地开发：前端只用 pnpm
 
-Node 22+、pnpm 10.20.0、Windows PowerShell 5.1+。
+Node 22+、pnpm 10.20.0、Windows PowerShell 5.1+、Windows 自带 .NET Framework 4.7.2+。
 
 ```powershell
 pnpm install --frozen-lockfile
@@ -53,9 +61,10 @@ pnpm start
 pnpm test
 pnpm smoke
 pnpm build
+pnpm benchmark:memory
 ```
 
-`prepare:assets` 从官方源下载固定版本 LibreHardwareMonitor v0.9.6 和 Maple Mono NF CN v7.9，验证发布资产 SHA256，保留许可证。应用只打包 Regular/Bold 两个字重，字体不安装到系统。
+`prepare:assets` 从官方源下载固定版本 LibreHardwareMonitor v0.9.6 和 Maple Mono NF CN v7.9，验证发布资产 SHA256，保留许可证。应用只打包 Regular/Bold 两个字重，字体不安装到系统。运行/打包脚本使用 Windows 现有 .NET Framework 编译器构建轻量传感器宿主；不额外下载 .NET SDK，不再保留常驻 PowerShell 采集进程。
 
 pnpm store/cache/state 位于 `.pnpm-store/`、`.pnpm-cache/`、`.pnpm-state/`；Electron 运行/构建脚本将二进制缓存固定到 `.electron-cache/`、`.electron-builder-cache/`。不使用 npm，不提交 node_modules、缓存、vendor、dist 或运行时数据。
 

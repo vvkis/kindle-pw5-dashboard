@@ -10,5 +10,6 @@ contextBridge.exposeInMainWorld('kindle',{
   searchWeather:name=>ipcRenderer.invoke('weather-search',name),
   chooseKey:()=>ipcRenderer.invoke('choose-key'),
   openData:()=>ipcRenderer.invoke('open-data'),
+  background:()=>ipcRenderer.invoke('background'),
   onState:callback=>{const listener=(_event,state)=>callback(state);ipcRenderer.on('update',listener);return()=>ipcRenderer.removeListener('update',listener);}
 });

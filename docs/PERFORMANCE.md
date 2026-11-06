@@ -28,3 +28,25 @@
 `scripts/benchmark.cjs` 测试 3 秒采样链路；先编译 `scripts/ProcessMeter.cs` 为 `out/ProcessMeter.exe`。报告位于 `out/benchmark-collector.json`。计量包装器自身的额外开销不计入生产采样成本。
 
 `scripts/benchmark-helper.ps1` 在当前权限运行采集器，预热后测量并正常停止。报告位于 `out/benchmark-helper.json`。原始报告、机器状态、位置配置均留在本机，不上传。
+
+
+## v0.2.2 内存优化复测
+
+本次保留完整 Maple Mono NF CN 字体、真实 GPU/内存/CPU 占用采样、横屏桌面。每个界面阶段各测 30 秒，开始测量前均完成一次实际 PNG 导出，导出进程退出后再采样。CPU 温度采集器在未提权状态单独测 60.86 秒；管理员驱动路径仍待授权后验证。
+
+| 进程范围 | 平均私有内存 | 平均工作集合计 | 平均整机 CPU |
+|---|---:|---:|---:|
+| 新版前台控制面板 + 后台业务 | 216.9 MiB | 342.8 MiB | 0.034% |
+| 新版托盘后台，控制面板已销毁 | 101.2 MiB | 219.7 MiB | 0.019% |
+| 新版原生传感器宿主，未提权 | 51.6 MiB | 70.4 MiB | 0.124% |
+
+- 旧版前台私有内存 344.3 MiB，新版约 216.9 MiB，降低约 37%；使用托盘后台时，桌面部分相对旧版降低约 71%。
+- 传感器宿主从 PowerShell 的 94.6 MiB 改为原生 CLR 程序的约 51.6 MiB，减少约 45%。两次 CPU 用量不同，不据此宣称原生宿主更省 CPU。
+- 前台与后台阶段在同一次运行中测量；旧版对比与传感器测量属于独立时间窗口，数字不是严格的同机同时合计或所有负载的上限。
+- 托盘后台没有保留 Tab 渲染进程。采集继续运行，模拟定时 USB 推送、恢复控制面板、双方向排版均已通过集成检查；没有用裁剪工作集的方式掩盖内存占用。
+- 关闭界面硬件加速降低 GPU 进程占用；PNG 由短命 utility 进程导出，字体与栅格化分配随进程退出释放。这会增加每次导出的进程启动开销，以换取更低的常驻内存。
+- 上表不包含 PNG 导出时临时进程的峰值，也不包含真实 USB/SSH 设备负载。任务管理器采用的内存列可能与私有提交量不同，工作集也一并列出，避免混淆。
+
+运行 `pnpm benchmark:memory` 复现前台 → 托盘后台 → 恢复界面的测量，原始报告在 `runtime/benchmark-memory.json`。运行 `scripts/benchmark-helper.ps1` 测试原生宿主，报告在 `out/benchmark-helper-native.json`；加 `-Legacy` 可对比旧 PowerShell 宿主。
+
+实现参考：[Electron 硬件加速与进程指标](https://www.electronjs.org/docs/latest/api/app)、[临时 utilityProcess](https://www.electronjs.org/docs/latest/api/utility-process)。

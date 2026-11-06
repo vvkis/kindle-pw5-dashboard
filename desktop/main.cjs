@@ -1,10 +1,10 @@
-const {app,BrowserWindow,ipcMain,protocol,net,dialog,shell}=require('electron');
+const {app,BrowserWindow,ipcMain,protocol,net,dialog,shell,Tray,Menu,nativeImage}=require('electron');
 const fs=require('node:fs/promises');
 const path=require('node:path');
 const {pathToFileURL}=require('node:url');
 const {execFile}=require('node:child_process');
 const {promisify}=require('node:util');
-const Raster=require('./render.cjs');
+const {renderJob}=require('./render-job.cjs');
 const Model=require('./model.cjs');
 const {Sensors}=require('./sensors.cjs');
 const {Transport}=require('./transport.cjs');
@@ -15,6 +15,8 @@ const DATA=app.isPackaged?path.join(path.dirname(process.execPath),'Kindle Monit
 const RESOURCE=app.isPackaged?process.resourcesPath:path.join(ROOT,'vendor');
 const SMOKE=process.argv.includes('--smoke-test');
 const BENCH=process.argv.includes('--benchmark');
+const MEMORY_BENCH=process.argv.includes('--benchmark-memory');
+if(!process.argv.includes('--enable-gpu'))app.disableHardwareAcceleration();
 // One display pixel per CSS pixel also makes offscreen export independent of Windows DPI.
 app.commandLine.appendSwitch('force-device-scale-factor','1');
 app.setPath('userData',DATA);
@@ -22,10 +24,10 @@ app.setPath('sessionData',path.join(DATA,'chromium'));
 app.setPath('crashDumps',path.join(DATA,'crashes'));
 protocol.registerSchemesAsPrivileged([{scheme:'asset',privileges:{standard:true,secure:true,supportFetchAPI:true,corsEnabled:true}}]);
 if(!app.requestSingleInstanceLock()) app.quit();
-let window,config=Model.defaults(),sample=null,history=[],logs=[],auto=false,nextPush=0,sampling=false,exportChain=Promise.resolve(),stopping=false;
+let window,tray,backgroundMode=false,config=Model.defaults(),sample=null,history=[],logs=[],auto=false,nextPush=0,sampling=false,exportChain=Promise.resolve(),stopping=false;
 const sensors=new Sensors(DATA),transport=new Transport(),weather=new Weather();
 const state=()=>({config,sample,history,logs,auto,nextPush,busy:transport.busy,weather:weather.value});
-function broadcast(){if(window&&!window.isDestroyed())window.webContents.send('update',state());}
+function broadcast(){if(window&&!window.isDestroyed()&&window.isVisible()&&!window.isMinimized())window.webContents.send('update',state());}
 function log(message,level='info'){
   const item={at:new Date().toISOString(),message,level};logs=[item,...logs].slice(0,80);
   fs.appendFile(path.join(DATA,'activity.log'),JSON.stringify(item)+'\n').catch(()=>{});broadcast();
@@ -50,7 +52,7 @@ async function renderPng(){
   // Export without another Chromium window. Keep manual export and auto-push serialized.
   const operation=exportChain.catch(()=>{}).then(async()=>{
     if(!sample)throw new Error('请等待第一轮传感器采样');
-    return Raster.renderPng(config,sample,history,path.join(RESOURCE,'fonts'),path.join(DATA,'dashboard.png'),weather.value);
+    return renderJob(config,sample,history,path.join(RESOURCE,'fonts'),path.join(DATA,'dashboard.png'),weather.value);
   });exportChain=operation;return operation;
 }
 let pushing=false;
@@ -65,12 +67,13 @@ async function enableSensors(){
   const current=await sensors.readHelper();
   if(current?.elevated)return {message:'传感器采集器已运行'};
   await fs.rm(path.join(DATA,'sensors.stop'),{force:true});
-  const helper=app.isPackaged?path.join(process.resourcesPath,'sensors','sensor-helper.ps1'):path.join(__dirname,'sensor-helper.ps1');
+  const helper=app.isPackaged?path.join(process.resourcesPath,'sensors','SensorHelper.exe'):path.join(RESOURCE,'sensors','SensorHelper.exe');
+  await fs.access(helper);
   const quoted=value=>`'${String(value).replace(/'/g,"''")}'`;
   const ps=path.join(process.env.SystemRoot||'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe');
   // UAC remains a normal Windows user prompt; this app never auto-accepts it.
-  const argumentsString=`-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${helper}" -LibraryDir "${library}" -RuntimeDir "${DATA}"`;
-  const script=`$ErrorActionPreference='Stop'; Start-Process -FilePath ${quoted(ps)} -Verb RunAs -WindowStyle Hidden -ArgumentList ${quoted(argumentsString)}`;
+  const argumentsString=`"${library}" "${DATA}"`;
+  const script=`$ErrorActionPreference='Stop'; Start-Process -FilePath ${quoted(helper)} -Verb RunAs -WindowStyle Hidden -ArgumentList ${quoted(argumentsString)}`;
   await run(ps,['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],{windowsHide:true,timeout:60000});
   log('已请求启动传感器采集器，等待 CPU 温度数据');return {message:'请在 Windows 提示中确认，随后等待几秒'};
 }
@@ -78,6 +81,34 @@ function handle(channel,fn){ipcMain.handle(channel,async(event,...args)=>{
   if(event.sender!==window?.webContents || event.senderFrame!==window.webContents.mainFrame)throw new Error('无效来源');
   try{return {ok:true,data:await fn(...args)};}catch(e){return {ok:false,error:e.message};}
 });}
+async function openWindow(){
+  if(window&&!window.isDestroyed()){window.restore();window.show();window.focus();return window;}
+  backgroundMode=false;
+  const current=new BrowserWindow({title:'Kindle Monitor',icon:path.join(__dirname,'icon.png'),width:1480,height:1000,minWidth:1120,minHeight:780,backgroundColor:'#f4f4ef',show:!SMOKE,
+    autoHideMenuBar:true,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
+  current.webContents.setWindowOpenHandler(()=>({action:'deny'}));
+  current.webContents.on('will-navigate',event=>event.preventDefault());
+  window=current;
+  current.on('closed',()=>{if(window===current)window=null;if(!backgroundMode)app.quit();});
+  current.on('show',broadcast);current.on('restore',broadcast);
+  await current.loadFile(path.join(__dirname,'ui','index.html'));
+  return current;
+}
+function trayMenu(){
+  return Menu.buildFromTemplate([
+    {label:'打开控制面板',click:()=>openWindow().catch(e=>log(e.message,'error'))},
+    {label:'立即推送',click:()=>push().catch(()=>{})},
+    {label:'自动推送',type:'checkbox',checked:auto,click:item=>{auto=item.checked;nextPush=auto?Date.now()+config.pushInterval*1000:0;log(auto?'已开启定时推送':'已停止定时推送');tray.setContextMenu(trayMenu());}},
+    {type:'separator'},{label:'退出',click:()=>app.quit()}
+  ]);
+}
+function enterBackground(){
+  if(stopping)return;
+  if(!tray){tray=new Tray(nativeImage.createFromPath(path.join(__dirname,'icon.png')).resize({width:16,height:16}));tray.setToolTip('Kindle Monitor · 后台采集与推送');tray.on('double-click',()=>openWindow().catch(e=>log(e.message,'error')));}
+  tray.setContextMenu(trayMenu());backgroundMode=true;
+  if(window&&!window.isDestroyed()){window.destroy();window=null;}
+  log('后台省内存模式：控制面板已释放，采集与推送继续运行');
+}
 app.whenReady().then(async()=>{
   await fs.mkdir(DATA,{recursive:true});
   try{config=Model.sanitize(JSON.parse(await fs.readFile(path.join(DATA,'settings.json'),'utf8')));}catch{}
@@ -86,14 +117,11 @@ app.whenReady().then(async()=>{
     if(url.hostname!=='font'||!['/regular','/bold'].includes(url.pathname))return new Response('Not found',{status:404});
     return net.fetch(pathToFileURL(path.join(RESOURCE,'fonts',name)).toString());
   });
-  window=new BrowserWindow({title:'Kindle Monitor',icon:path.join(__dirname,'icon.png'),width:1480,height:1000,minWidth:1120,minHeight:780,backgroundColor:'#f4f4ef',show:!SMOKE,
-    autoHideMenuBar:true,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
-  window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
-  window.webContents.on('will-navigate',event=>event.preventDefault());
   handle('state',state);handle('save',saveConfig);handle('test-connection',()=>transport.test(config));handle('push',push);
   handle('weather-search',name=>weather.search(name));
-  handle('auto',enabled=>{auto=Boolean(enabled);nextPush=auto?Date.now()+config.pushInterval*1000:0;log(auto?'已开启定时推送':'已停止定时推送');return state();});
+  handle('auto',enabled=>{auto=Boolean(enabled);nextPush=auto?Date.now()+config.pushInterval*1000:0;if(tray)tray.setContextMenu(trayMenu());log(auto?'已开启定时推送':'已停止定时推送');return state();});
   handle('enable-sensors',enableSensors);
+  handle('background',()=>{setTimeout(enterBackground,100);return true;});
   handle('choose-key',async()=>{const result=await dialog.showOpenDialog(window,{title:'选择本机 SSH 私钥',properties:['openFile']});return result.canceled?null:result.filePaths[0];});
   handle('open-data',async()=>{await shell.openPath(DATA);return true;});
   handle('export',async()=>{
@@ -103,7 +131,7 @@ app.whenReady().then(async()=>{
     const page=require('./widgets.cjs').screen(config.orientation);
     log(`已导出 ${page.width}×${page.height} 灰阶 PNG`);return result.filePath;
   });
-  await window.loadFile(path.join(__dirname,'ui','index.html'));
+  await openWindow();
   log('应用已启动，自动推送默认关闭');
   await collect();
   const weatherTask=weather.update(config).then(broadcast).catch(()=>{});
@@ -112,7 +140,28 @@ app.whenReady().then(async()=>{
   const pushTimer=setInterval(()=>{
     if(auto&&Date.now()>=nextPush&&!pushing){nextPush=Date.now()+config.pushInterval*1000;push().catch(()=>{});}
   },1000);
-  window.on('closed',()=>{clearInterval(timer);clearInterval(pushTimer);clearInterval(weatherTimer);app.quit();});
+  app.on('before-quit',()=>{clearInterval(timer);clearInterval(pushTimer);clearInterval(weatherTimer);});
+  if(MEMORY_BENCH){
+    const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+    async function measure(name){
+      const start=Date.now(),initial=app.getAppMetrics(),rows=[];
+      while(Date.now()-start<30000){await delay(1000);rows.push(app.getAppMetrics());}
+      const end=rows.at(-1),seconds=(Date.now()-start)/1000;
+      const summarize=key=>{const values=rows.map(row=>row.reduce((sum,item)=>sum+(item.memory[key]||0)/1024,0));return{mean:values.reduce((a,b)=>a+b,0)/values.length,max:Math.max(...values)};};
+      const cpu=end.reduce((sum,item)=>sum+Math.max(0,(item.cpu.cumulativeCPUUsage||0)-(initial.find(before=>before.pid===item.pid)?.cpu.cumulativeCPUUsage||0)),0);
+      return{name,seconds,privateMiB:summarize('privateBytes'),workingSetMiB:summarize('workingSetSize'),wholeMachineCpuPercent:cpu/seconds/require('node:os').cpus().length*100,processes:end.map(item=>({type:item.type,name:item.name,privateMiB:item.memory.privateBytes/1024}))};
+    }
+    await weatherTask;await renderPng();await delay(10000);
+    const foreground=await measure('foreground-after-export');
+    const before=sample.at;enterBackground();await delay(8000);await renderPng();await delay(3000);
+    const background=await measure('tray-after-export');
+    const continued=sample.at!==before&&!window;
+    await openWindow();await delay(2000);
+    const restored=await window.webContents.executeJavaScript('!!window.kindle && !!document.querySelector("#kindle-preview svg")');
+    const report={at:new Date().toISOString(),hardwareAcceleration:process.argv.includes('--enable-gpu'),foreground,background,samplingContinued:continued,restored,scope:'30s each phase, 3s sampling; one full Maple-font PNG export before each phase; helper measured separately; no actual USB device push.'};
+    await fs.writeFile(path.join(DATA,'benchmark-memory.json'),JSON.stringify(report,null,2));console.log('MEMORY BENCHMARK',JSON.stringify(report));
+    if(!continued||!restored)throw new Error('Background lifecycle failed');app.quit();
+  }
   if(BENCH){
     await new Promise(r=>setTimeout(r,10000));
     const baseline=app.getAppMetrics(),start=Date.now(),measurements=[];
@@ -134,6 +183,7 @@ app.whenReady().then(async()=>{
   }
   if(SMOKE){
     await weatherTask;
+    window.webContents.send('update',state());
     await new Promise(r=>setTimeout(r,1600));
     await renderPng();
     await fs.writeFile(path.join(DATA,'smoke-state.json'),JSON.stringify(state(),null,2));
@@ -153,13 +203,26 @@ app.whenReady().then(async()=>{
       if(view.width!==String(dimensions.width)||view.height!==String(dimensions.height)||view.widgets!==config.layouts[orientation].length)throw new Error('Orientation editor failed: '+JSON.stringify(view));
       await window.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
       await fs.writeFile(path.join(DATA,`editor-${orientation}.png`),(await window.webContents.capturePage()).toPNG());
-      await Raster.renderPng({...config,orientation,widgets:config.layouts[orientation]},sample,history,path.join(RESOURCE,'fonts'),path.join(DATA,`dashboard-${orientation}.png`),weather.value);
+      await renderJob({...config,orientation,widgets:config.layouts[orientation]},sample,history,path.join(RESOURCE,'fonts'),path.join(DATA,`dashboard-${orientation}.png`),weather.value);
       orientationChecks.push({orientation,...view});
     }
     await fs.writeFile(path.join(DATA,'smoke-orientations.json'),JSON.stringify(orientationChecks,null,2));
+    const before=sample.at,execute=transport.execute;let backgroundSent=false;
+    enterBackground();transport.execute=async(file)=>{if(file.endsWith('scp.exe'))backgroundSent=true;return{stdout:''};};
+    auto=true;nextPush=Date.now();
+    for(let i=0;i<100&&(!backgroundSent||pushing||sample.at===before);i++)await new Promise(resolve=>setTimeout(resolve,100));
+    auto=false;
+    if(pushing||!backgroundSent)throw new Error('模拟推送超时，测试未连接真实设备');
+    transport.execute=execute;
+    const released=!app.getAppMetrics().some(item=>item.type==='Tab');
+    await openWindow();await new Promise(resolve=>setTimeout(resolve,1000));
+    const restored=await window.webContents.executeJavaScript('!!window.kindle && !!document.querySelector("#kindle-preview svg")');
+    const backgroundCheck={rendererReleased:released,samplingContinued:sample.at!==before,scheduledPush:backgroundSent,restored};
+    await fs.writeFile(path.join(DATA,'smoke-background.json'),JSON.stringify(backgroundCheck,null,2));
+    if(Object.values(backgroundCheck).some(value=>!value))throw new Error('Background lifecycle failed: '+JSON.stringify(backgroundCheck));
     console.log('SMOKE PASS',JSON.stringify(check));app.quit();
   }
 }).catch(error=>{console.error(error);app.exit(1);});
 app.on('before-quit',()=>{stopping=true;fs.writeFile(path.join(DATA,'sensors.stop'),'stop').catch(()=>{});});
-app.on('window-all-closed',()=>app.quit());
-app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.focus();}});
+app.on('window-all-closed',()=>{if(!backgroundMode)app.quit();});
+app.on('second-instance',()=>{app.whenReady().then(openWindow).catch(e=>log(e.message,'error'));});

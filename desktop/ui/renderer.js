@@ -123,3 +123,5 @@ $('orientation').onchange=()=>{
  editing=true;renderEditor();updatePreview();
 };
 $('landscape-top').onchange=()=>{draft.landscapeTop=$('landscape-top').value;editing=true;updatePreview();};
+
+$('background').onclick=()=>action($('background'),async()=>{await saveAll();await call('background');});

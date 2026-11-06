@@ -1,6 +1,6 @@
 {
   "name": "kindle-monitor",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "packageManager": "pnpm@10.20.0",
   "description": "Editable PC hardware monitor for Kindle PW5 over USBNetwork",
@@ -12,7 +12,8 @@
     "smoke": "node scripts/run-desktop.cjs smoke",
     "build": "node scripts/run-desktop.cjs build",
     "prepare:assets": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-assets.ps1",
-    "benchmark": "node scripts/run-desktop.cjs benchmark"
+    "benchmark": "node scripts/run-desktop.cjs benchmark",
+    "benchmark:memory": "node scripts/run-desktop.cjs memory"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -59,8 +60,12 @@
         ]
       },
       {
-        "from": "desktop/sensor-helper.ps1",
-        "to": "sensors/sensor-helper.ps1"
+        "from": "vendor/sensors",
+        "to": "sensors",
+        "filter": [
+          "*.exe",
+          "*.config"
+        ]
       }
     ],
     "win": {
