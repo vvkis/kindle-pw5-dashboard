@@ -52,6 +52,7 @@ def find_font(explicit: Path | None = None) -> Path:
             raise ValueError(f"Font not found: {explicit}")
         return explicit
     candidates = [
+        ROOT / "vendor/fonts/MapleMono-NF-CN-Regular.ttf",
         Path("C:/Windows/Fonts/msyh.ttc"),
         Path("C:/Windows/Fonts/simhei.ttf"),
         Path("/System/Library/Fonts/PingFang.ttc"),

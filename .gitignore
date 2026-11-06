@@ -12,3 +12,14 @@ data/*.local.json
 *.log
 .DS_Store
 Thumbs.db
+node_modules/
+.npm-cache/
+.pnpm-store/
+.pnpm-cache/
+.pnpm-state/
+.electron-cache/
+.electron-builder-cache/
+vendor/
+dist/
+runtime/
+*.tsbuildinfo
