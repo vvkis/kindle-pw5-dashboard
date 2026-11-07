@@ -61,7 +61,7 @@ function update(next){
 function fillForms(){
  if(!draft)return;
  for(const id of ['title','note','host','port'])$(id).value=draft[id];
- $('identity-file').value=draft.identityFile;$('connection-mode').value=draft.connectionMode;$('wifi-host').value=draft.wifiHost;$('font-weight').value=draft.fontWeight;renderConnection();
+ $('identity-file').value=draft.identityFile;$('connection-mode').value=draft.connectionMode;$('wifi-host').value=draft.wifiHost;$('http-host').value=draft.httpHost;$('http-port').value=draft.httpPort;$('http-token').value=draft.httpToken;$('eips-refresh').checked=draft.eipsRefresh!==false;$('font-weight').value=draft.fontWeight;renderConnection();
  $('orientation').value=draft.orientation;$('landscape-top').value=draft.landscapeTop;$('landscape-placement').classList.toggle('hidden',draft.orientation!=='landscape');
  $('weather-name').value=draft.weather.name;$('latitude').value=draft.weather.latitude;$('longitude').value=draft.weather.longitude;$('show-weather').checked=draft.weather.enabled;
  $('interval').value=draft.pushInterval;
@@ -85,14 +85,15 @@ document.querySelectorAll('.nav').forEach(button=>button.onclick=()=>{
  document.querySelector('.content-grid').classList.toggle('edit-mode',tab==='editor');
  for(const name of ['overview','editor','connection'])$(name+'-panel').classList.toggle('hidden',tab!==name);
  $('page-name').textContent=button.textContent.trim().slice(1).trim();
- const headings={overview:['桌面一览','时间、天气与电脑状态，都在这里。'],editor:['编辑桌面','像整理手机桌面一样，安排每一块小组件。'],connection:['连接 Kindle','通过 USB 或 Wi-Fi，同步每一次更新。']};
+ const headings={overview:['桌面一览','时间、天气与电脑状态，都在这里。'],editor:['编辑桌面','像整理手机桌面一样，安排每一块小组件。'],connection:['连接 Kindle','推荐打开 Kindle 上的看板模式，用 Wi-Fi 接收图片。']};
  $('heading').textContent=headings[tab][0];$('subtitle').textContent=headings[tab][1];
  updatePreview();
 });
 for(const id of ['title','note'])$(id).addEventListener('input',()=>{draft[id]=$(id).value;editing=true;updatePreview();});
-for(const id of ['host','wifi-host','port','identity-file','interval','cpu-sensor'])$(id).addEventListener('input',()=>{editing=true;});
+for(const id of ['host','wifi-host','port','identity-file','interval','cpu-sensor','http-host','http-port','http-token'])$(id).addEventListener('input',()=>{editing=true;});
+$('eips-refresh').addEventListener('change',()=>{editing=true;});
 async function saveAll(){
- const clean={...draft,title:$('title').value,note:$('note').value,connectionMode:$('connection-mode').value,wifiHost:$('wifi-host').value.trim(),fontWeight:Number($('font-weight').value),host:$('host').value.trim(),port:Number($('port').value),identityFile:$('identity-file').value.trim(),pushInterval:Number($('interval').value),cpuSensor:$('cpu-sensor').value,weather:{name:$('weather-name').value,latitude:Number($('latitude').value),longitude:Number($('longitude').value),enabled:$('show-weather').checked}};
+ const clean={...draft,title:$('title').value,note:$('note').value,connectionMode:$('connection-mode').value,wifiHost:$('wifi-host').value.trim(),httpHost:$('http-host').value.trim(),httpPort:Number($('http-port').value),httpToken:$('http-token').value.trim(),eipsRefresh:$('eips-refresh').checked,fontWeight:Number($('font-weight').value),host:$('host').value.trim(),port:Number($('port').value),identityFile:$('identity-file').value.trim(),pushInterval:Number($('interval').value),cpuSensor:$('cpu-sensor').value,weather:{name:$('weather-name').value,latitude:Number($('latitude').value),longitude:Number($('longitude').value),enabled:$('show-weather').checked}};
  draft=await call('save',clean);editing=false;toast('设置已保存');updatePreview();
 }
 $('save-editor').onclick=()=>action($('save-editor'),saveAll);$('save-connection').onclick=()=>action($('save-connection'),saveAll);
@@ -102,8 +103,8 @@ $('widget-label').oninput=()=>{const widget=draft.widgets.find(w=>w.id===selecte
 $('widget-size').onchange=()=>{const size=$('widget-size').value.split(',').map(Number);try{draft.widgets=W.validate(draft.widgets.map(w=>w.id===selected?{...w,w:size[0],h:size[1]}:w),draft.orientation);editing=true;updatePreview();}catch(error){toast('该大小会重叠或越界，请先腾出空间',true);}renderEditor();};
 $('remove-widget').onclick=()=>{draft.widgets=draft.widgets.filter(w=>w.id!==selected);selected=draft.widgets[0]?.id;editing=true;renderEditor();updatePreview();};
 for(const [id,dx,dy]of [['move-left',-1,0],['move-up',0,-1],['move-down',0,1],['move-right',1,0]])$(id).onclick=()=>{const w=draft.widgets.find(w=>w.id===selected);if(!w)return;try{draft.widgets=W.move(draft.widgets,w.id,w.x+dx,w.y+dy,draft.orientation);editing=true;updatePreview();}catch(error){toast(error.message,true);}renderEditor();};
-$('test').onclick=()=>action($('test'),async()=>{await saveAll();const result=await call('test');$('device-state').textContent=(draft.connectionMode==='wifi'?'Wi-Fi':'USBNetwork')+' 已连接';$('device-dot').classList.add('connected');toast(result.message);});
-$('push').onclick=()=>action($('push'),async()=>{await saveAll();await call('push');$('device-state').textContent='已成功推送';$('device-dot').classList.add('connected');toast('Kindle 已刷新');});
+$('test').onclick=()=>action($('test'),async()=>{await saveAll();const result=await call('test');const mode=draft.connectionMode;$('device-state').textContent=mode==='http'?'看板插件已连接':(mode==='wifi'?'Wi-Fi':'USBNetwork')+' 已连接';$('device-dot').classList.add('connected');toast(result.message);});
+$('push').onclick=()=>action($('push'),async()=>{await saveAll();await call('push');$('device-state').textContent='已成功推送';$('device-dot').classList.add('connected');toast(draft.connectionMode==='http'?'看板已更新':'Kindle 已刷新');});
 $('export').onclick=()=>action($('export'),async()=>{await saveAll();if(await call('export'))toast('PNG 已导出');});
 $('auto').onchange=async()=>{const enabled=$('auto').checked;try{await saveAll();await call('auto',enabled);}catch(e){$('auto').checked=state.auto;toast(e.message,true);}};
 $('enable-sensors').onclick=()=>action($('enable-sensors'),async()=>{enablingSensors=true;$('enable-sensors').textContent='正在启用…';toast('请确认 Windows 管理员授权，程序会自动完成配置。');try{const result=await call('sensors');toast(result.message);}finally{enablingSensors=false;}});
@@ -129,9 +130,12 @@ $('landscape-top').onchange=()=>{draft.landscapeTop=$('landscape-top').value;edi
 $('background').onclick=()=>action($('background'),async()=>{await saveAll();await call('background');});
 
 function renderConnection(){
- const wifi=$('connection-mode').value==='wifi';
+ const mode=$('connection-mode').value;
+ const http=mode==='http', wifi=mode==='wifi';
+ $('http-fields').classList.toggle('hidden',!http);
+ $('ssh-fields').classList.toggle('hidden',http);
  $('host').disabled=wifi;$('wifi-address-field').classList.toggle('hidden',!wifi);
- $('connection-help').textContent=wifi?'电脑与 Kindle 请连接可互通的局域网。Kindle 需已启用无线 SSH（USBNetwork 的 Wi-Fi SSH 功能），填写设备在路由器中的无线地址后检测连接；同步时可以拔掉 USB。':'先在 Kindle 启用 USBNetwork，并配置电脑侧静态 IP 和 SSH 公钥。普通 USB 磁盘模式不能实时刷屏。';
+ $('connection-help').textContent=http?'在 KOReader 主菜单打开「看板模式」。把屏幕上的地址、端口和配对口令填到这里。电脑与 Kindle 需在同一 Wi-Fi，不需要 SSH。':wifi?'电脑与 Kindle 请连接可互通的局域网。Kindle 需已启用无线 SSH（USBNetwork 的 Wi-Fi SSH 功能），填写设备在路由器中的无线地址后检测连接；同步时可以拔掉 USB。':'先在 Kindle 启用 USBNetwork，并配置电脑侧静态 IP 和 SSH 公钥。普通 USB 磁盘模式不能实时刷屏。';
 }
 $('connection-mode').onchange=()=>{draft.connectionMode=$('connection-mode').value;editing=true;renderConnection();$('device-state').textContent='等待检测连接';$('device-dot').classList.remove('connected');};
 $('font-weight').onchange=()=>{draft.fontWeight=Number($('font-weight').value);editing=true;updatePreview();};

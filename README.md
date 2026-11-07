@@ -43,9 +43,25 @@ CPU 占用和物理内存使用由系统读取；NVIDIA 默认通过驱动的 nv
 
 天气使用 Open-Meteo 周边网格预报，每 15 分钟更新，断网保留本次运行的缓存并标记。支持城市搜索与直接编辑 WGS84 经纬度。天气不是现场观测；设置和位置数据保存在本机，不提交 Git。
 
-## USB / Wi-Fi 同步
+## 看板插件（推荐）
 
-设备需先完成兼容越狱、USBNetwork 和 SSH 公钥配置。普通 USB 磁盘连接不提供实时刷屏。
+日常同步不需要 SSH、Jobman 或 USB 网络。Kindle 上的 KOReader 插件自己接收图片。
+
+把仓库里的 `kindle-plugin/dashboard.koplugin` 整个目录复制到 Kindle：
+
+`/mnt/us/koreader/plugins/dashboard.koplugin`
+
+可以用 USB 磁盘模式拷贝。复制后重启 KOReader，在主菜单打开「看板模式」（长按同一项可改端口、检查间隔或重新生成口令）。等待画面会显示本机 IP、端口（默认 8686）和配对口令。电脑与 Kindle 连接同一个 Wi-Fi。
+
+在应用「设备连接」中选择「看板插件 (HTTP)」，填入这三项，然后检测连接、推送。插件把图片写到临时文件，再改名为 `/mnt/us/dashboard.png` 并立刻刷新。单张图片需是 PNG，最大 8MB。`GET /status` 会返回插件版本和屏幕尺寸；上传和状态接口都要带配对口令。
+
+打开看板时屏幕保持点亮，耗电增加，长时间使用请接着充电。关闭看板、按电源键或退出 KOReader 时，插件会关掉 HTTP 服务，并撤销自己加过的防休眠。若进程崩溃，Kindle 上 `/tmp/kdash.lease` 约 90 秒没有更新后，会把 `preventScreenSaver` 设回 0。不往 `/mnt/us` 写常驻程序，不改屏保、月读的 `screensaver_*` / `book_*` 设置，也不碰 `.moon/`。非 Kindle 设备会跳过 `lipc`。
+
+已在设计上对齐 Kindle PW5 固件 5.18.1、KOReader 2026.7.2 与月读插件并存；实机显示、防火墙和保活仍需在设备上确认。从文件管理器打开一本书时，KOReader 会拆掉文件管理器里的插件实例，看板会关闭；进入阅读器后在主菜单再开一次即可。
+
+## USB / Wi-Fi 同步（SSH，可选）
+
+不用看板插件时，仍可通过 SSH 推送。设备需先完成兼容越狱、USBNetwork 和 SSH 公钥配置。普通 USB 磁盘连接不提供实时刷屏。
 
 **首次使用 Windows USB 连接，请先看 [USB 网卡驱动与连接指南](docs/USB-CONNECTION.md)**：包含 Jobman USB SSH、被误识别成 COM 串口的处理、已验证的 Kindle 专用驱动来源、静态 IP、公钥配置及“网络连接”窗口卡顿排查。驱动安装和网卡 IP 通常只需配置一次。
 
@@ -58,7 +74,9 @@ Wi-Fi 模式：在「设备连接 → 同步方式」选择「Wi-Fi 无线同步
 
 同步不会并发上传；分钟切换发生在上传期间时，完成后补推最新时间。失败后每 5 秒重试，恢复后直接同步最新画面，不补传过期画面。设备实际刷新完成时间包含图片生成、网络传输和屏幕刷新耗时。
 
-推送采用 legacy SCP，先校验 PNG，再上传唯一临时文件、原子替换 `/mnt/us/dashboard.png`，最后调用 `eips -f -g`。上传失败保留旧图；刷屏失败会报错。SSH 保持严格主机验证。不会修改固件、Wi-Fi、休眠或 OTA 设置。
+推送采用 legacy SCP，先校验 PNG，再上传到 `/mnt/us` 上的唯一临时文件，确认非空后原子改名为 `/mnt/us/dashboard.png`。默认接着调用 `eips -f -g`。若 Kindle 上开着看板插件、却仍想用 SSH 传文件，请在「设备连接」关闭「推送后用 eips 刷屏」：这时上传的是预览方向的图片，不再为原生帧缓冲旋转，也不调用 eips，由插件看到文件变化后自己刷新。上传失败保留旧图；开启 eips 时刷屏失败会报错。SSH 保持严格主机验证。不会修改固件、Wi-Fi 或 OTA 设置。
+
+推荐使用上面的看板插件 HTTP。SSH 的 USB / Wi-Fi 地址留给没有安装插件的设备。
 
 已在 Windows 11 / Ryzen 7 9700X 与 Kindle PW5 上完成 USB SSH 推送及 CPU 温度读取验证；其他硬件、驱动策略和 Wi-Fi 网络仍需各自验证。
 

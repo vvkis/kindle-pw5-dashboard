@@ -5,7 +5,7 @@ const path=require('node:path');
 const {PNG}=require('pngjs');
 const M=require('../desktop/model.cjs'),W=require('../desktop/widgets.cjs');
 const {parseNvidia,selectCpuSensor,Sensors}=require('../desktop/sensors.cjs');
-const {Transport,argsFor,deviceImage}=require('../desktop/transport.cjs');
+const {Transport,argsFor,deviceImage,payloadFor,installCommand,httpCall}=require('../desktop/transport.cjs');
 const Raster=require('../desktop/render.cjs');
 const {conditions}=require('../desktop/weather.cjs');
 const ROOT=path.resolve(__dirname,'..');
@@ -25,7 +25,13 @@ test('configuration rejects command injection, invalid coordinates, unknown or d
  assert.throws(()=>M.sanitize({...M.defaults(),host:'host;cmd'}));
  assert.throws(()=>M.sanitize({...M.defaults(),weather:{latitude:100,longitude:2}}));
  assert.throws(()=>M.sanitize({...M.defaults(),widgets:[{id:'a',type:'evil',x:0,y:0,w:1,h:1}]}));
- assert.equal(argsFor(M.defaults()).args.includes('StrictHostKeyChecking=yes'),true);
+ assert.equal(argsFor({...M.defaults(),connectionMode:'usb'}).args.includes('StrictHostKeyChecking=yes'),true);
+ assert.equal(M.defaults().connectionMode,'http');
+ assert.equal(M.sanitize({httpPort:8686,httpToken:'abcDEF12'}).httpToken,'abcDEF12');
+ assert.throws(()=>M.sanitize({httpToken:'口令 带空格'}));
+ assert.throws(()=>M.sanitize({httpHost:'bad host'}));
+ assert.equal(M.sanitize({eipsRefresh:false}).eipsRefresh,false);
+ assert.equal(M.sanitize({}).eipsRefresh,true);
 });
 test('SVG escapes editable text, uses Maple, and retains clock/weather/footer',()=>{
  const c=M.defaults();c.title='<script>&';c.note='测试留言';const s={at:'2026-11-06T10:00:00Z',hostname:'<host>',values:{gpuTemp:37}};
@@ -58,7 +64,7 @@ test('raster export is full-size grayscale, contains footer, and failed SCP neve
   const buf=await fs.readFile(image),png=PNG.sync.read(buf);assert.equal(png.width,1236);assert.equal(png.height,1648);assert.equal(buf[25],0);
   const pixel=(x,y)=>png.data[(y*png.width+x)*4];assert.ok(pixel(500,1572)<100,'footer rule must be present below the monitor height');
   const calls=[];const transport=new Transport(async(file,args)=>{calls.push({file,args});if(file.endsWith('scp.exe'))throw {stderr:'upload failed'};return{stdout:''};});
-  await assert.rejects(transport.push(M.defaults(),image),/upload failed/);assert.equal(transport.busy,false);
+  await assert.rejects(transport.push({...M.defaults(),connectionMode:'usb'},image),/upload failed/);assert.equal(transport.busy,false);
   assert.ok(!calls.some(c=>c.args.some(a=>a.includes('&& mv'))));assert.ok(calls.at(-1).args.some(a=>a.startsWith('rm -f')));
  }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
@@ -160,4 +166,87 @@ test('independent multiline notes and font weights persist through layout edits'
  saved.widgets.find(w=>w.type==='note').content='';
  const empty=M.dashboardSvg(saved,{values:{}},[]);
  assert.equal(empty.split('底部留言').length-1,1,'empty note must not inherit footer');
+});
+
+function grayPng(width, height) {
+ const png=new PNG({width,height});
+ png.data.fill(255);
+ return PNG.sync.write(png,{colorType:0,inputColorType:6,bitDepth:8});
+}
+
+test('SSH install renames atomically and eips is optional',()=>{
+ const temp='/mnt/us/dashboard.abc-def.tmp.png';
+ assert.equal(installCommand(temp,true),`test -s '${temp}' && mv '${temp}' /mnt/us/dashboard.png && eips -f -g /mnt/us/dashboard.png`);
+ assert.equal(installCommand(temp,false),`test -s '${temp}' && mv '${temp}' /mnt/us/dashboard.png`);
+ assert.throws(()=>installCommand('/mnt/us/dashboard.png;reboot',false));
+ assert.equal(installCommand(temp,false).includes('/mnt/us/dashboard.png'),true);
+});
+
+test('turning eips off keeps the readable PNG and skips the refresh command',async()=>{
+ const dir=await fs.mkdtemp(path.join(ROOT,'out','eips-off-'));
+ try{
+  const file=path.join(dir,'landscape.png');
+  await fs.writeFile(file,grayPng(1648,1236));
+  const config=M.sanitize({orientation:'landscape',connectionMode:'usb',eipsRefresh:false,landscapeTop:'left'});
+  const calls=[];
+  const transport=new Transport(async(bin,args,options)=>{
+   calls.push({bin,args,options});
+   if(bin.endsWith('scp.exe')){
+    const local=args.find(arg=>arg.startsWith('./'));
+    const sent=PNG.sync.read(await fs.readFile(path.join(options.cwd,local)));
+    assert.equal(sent.width,1648);assert.equal(sent.height,1236);
+   }
+   return {stdout:''};
+  });
+  const result=await transport.push(config,file);
+  assert.equal(result.message.includes('等待插件刷新'),true);
+  const install=calls.map(call=>call.args.at(-1)).find(command=>String(command).includes('mv '));
+  assert.equal(install.includes('eips'),false);
+  assert.ok(install.startsWith('test -s '));
+  assert.ok(install.includes("mv '"));
+  assert.ok(install.includes('/mnt/us/dashboard.png'));
+ }finally{await fs.rm(dir,{recursive:true,force:true});}
+});
+
+test('HTTP mode uploads the PNG with a bearer token and never opens SSH',async()=>{
+ const dir=await fs.mkdtemp(path.join(ROOT,'out','http-push-'));
+ try{
+  const file=path.join(dir,'portrait.png');
+  await fs.writeFile(file,grayPng(1236,1648));
+  const config=M.sanitize({connectionMode:'http',httpHost:'192.168.1.20',httpPort:8686,httpToken:'abc123token',orientation:'portrait'});
+  const calls=[];
+  const transport=new Transport(async()=>{throw new Error('SSH should not run');}, async spec=>{
+   calls.push(spec);
+   if(spec.path==='/status')return {status:200,body:JSON.stringify({ok:true,version:'1',width:1236,height:1648,orientation:'portrait'})};
+   assert.equal(spec.path,'/dashboard.png');
+   assert.equal(spec.method,'POST');
+   assert.equal(spec.headers.Authorization,'Bearer abc123token');
+   assert.equal(spec.path.includes('abc123token'),false);
+   const image=PNG.sync.read(spec.body);
+   assert.equal(image.width,1236);assert.equal(image.height,1648);
+   return {status:200,body:'{"ok":true}'};
+  });
+  const status=await transport.test(config);
+  assert.equal(status.message.includes('1236×1648'),true);
+  const pushed=await transport.push(config,file);
+  assert.equal(pushed.message,'已通过看板插件更新图片');
+  assert.equal(calls.length,2);
+  const spec=httpCall(config,'POST','/dashboard.png',Buffer.from('x'));
+  assert.equal(spec.host,'192.168.1.20');
+  assert.equal(spec.port,8686);
+  assert.equal(spec.path.includes(config.httpToken),false);
+ }finally{await fs.rm(dir,{recursive:true,force:true});}
+});
+
+test('HTTP errors stay free of the pairing token',async()=>{
+ const config=M.sanitize({connectionMode:'http',httpHost:'kindle.local',httpPort:8686,httpToken:'secret-token'});
+ const transport=new Transport(async()=>{}, async()=>{const error=new Error('connect ECONNREFUSED');error.code='ECONNREFUSED';throw error;});
+ await assert.rejects(transport.test(config), error=>{
+  assert.equal(error.message.includes('secret-token'),false);
+  assert.match(error.message,/看板模式/);
+  return true;
+ });
+ const denied=new Transport(async()=>{}, async()=>({status:401,body:'{"ok":false}'}));
+ await assert.rejects(denied.test(config),/口令不正确/);
+ assert.throws(()=>payloadFor(grayPng(2,2),config),/1236×1648/);
 });

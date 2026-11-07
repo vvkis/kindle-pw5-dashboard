@@ -62,7 +62,7 @@ let pushing=false;
 async function push(){
   if(pushing)throw new Error('上一轮推送仍在进行');pushing=true;
   const renderedAt=Date.now();
-  try{const file=await renderPng(renderedAt);log(`正在通过 ${config.connectionMode==='wifi'?'Wi-Fi':'USBNetwork'} 推送…`);const result=await transport.push(config,file);sync.success(renderedAt);nextPush=Date.now()+config.pushInterval*1000;log(result.message);return result;}
+  try{const file=await renderPng(renderedAt);const via=config.connectionMode==='http'?'看板插件':config.connectionMode==='wifi'?'Wi-Fi':'USBNetwork';log(`正在通过 ${via} 推送…`);const result=await transport.push(config,file);sync.success(renderedAt);nextPush=Date.now()+config.pushInterval*1000;log(result.message);return result;}
   catch(e){sync.failure(Date.now());log(e.message,'error');throw e;}finally{pushing=false;broadcast();}
 }
 let sensorEnableTask=null;

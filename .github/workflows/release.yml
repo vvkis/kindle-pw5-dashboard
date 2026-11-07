@@ -32,6 +32,9 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Prepare verified build assets
         run: pnpm prepare:assets
+      - name: Install Lua
+        shell: pwsh
+        run: choco install lua -y --no-progress
       - name: Run tests
         run: pnpm test
       - name: Check desktop rendering and editing
