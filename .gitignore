@@ -1,14 +1,8 @@
-.venv/
-.uv-cache/
-__pycache__/
-*.py[cod]
-.pytest_cache/
 .env
 .env.*
 !.env.example
 out/
 config.local.json
-data/*.local.json
 *.log
 .DS_Store
 Thumbs.db
@@ -23,3 +17,15 @@ vendor/
 dist/
 runtime/
 *.tsbuildinfo
+*.bak
+*.before-*
+# Local SSH identities and exported credentials must never enter the repository.
+.ssh/
+id_rsa
+id_rsa.pub
+id_ed25519*
+known_hosts*
+*.pem
+*.key
+*.pfx
+*.p12

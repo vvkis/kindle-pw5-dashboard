@@ -32,7 +32,8 @@ class Sensors {
   async readHelper() {
     try {
       const data=JSON.parse((await fs.readFile(path.join(this.runtime,'sensors.json'),'utf8')).replace(/^\uFEFF/,''));
-      if(Date.now()-new Date(data.at).getTime()>15000) throw new Error('传感器数据已过期');
+      const age=Date.now()-new Date(data.at).getTime();
+      if(!Number.isFinite(age)||age>15000||age< -5000) throw new Error('传感器数据已过期');
       return data;
     } catch { return null; }
   }
@@ -64,7 +65,7 @@ class Sensors {
     }
     if(!cpu) messages.push(helper?.error || (config.cpuSensor?'指定的 CPU 传感器暂无数据，请重新选择。':helper?.elevated?'采集器已运行，但 CPU 温度暂不可用，请检查硬件兼容性与系统驱动策略。':'CPU 温度未连接。点击「启用 CPU 温度」启动内置采集器。'));
     if(!gpuResult && !gpuSensor) messages.push('未找到 GPU 传感器；NVIDIA 可使用 nvidia-smi，其他显卡请启用采集器。');
-    return {at:new Date().toISOString(),hostname:os.hostname(),cpuName:os.cpus()[0]?.model||'CPU',gpuName:gpuResult?.name||helper?.gpus?.find(g=>g.id===gpuId)?.name||'GPU',
+    return {at:new Date().toISOString(),cpuName:os.cpus()[0]?.model||'CPU',gpuName:gpuResult?.name||helper?.gpus?.find(g=>g.id===gpuId)?.name||'GPU',
       memoryTotal:os.totalmem()/1024**3,values,messages,sensors:sensors.filter(s=>s.type==='Temperature'),
       sources:{cpu:cpu?(helper?'内置 LibreHardwareMonitor':'LibreHardwareMonitor WMI'):'未连接',gpu:gpuResult?'NVIDIA 驱动':gpuSensor?'LibreHardwareMonitor':'未连接'},helper:helper?{elevated:helper.elevated,error:helper.error}:null};
   }

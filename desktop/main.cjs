@@ -7,8 +7,11 @@ const {promisify}=require('node:util');
 const {renderJob}=require('./render-job.cjs');
 const Model=require('./model.cjs');
 const {Sensors}=require('./sensors.cjs');
+const {enableTemperature}=require('./sensor-start.cjs');
 const {Transport}=require('./transport.cjs');
 const {Weather}=require('./weather.cjs');
+const {SyncSchedule}=require('./sync.cjs');
+const sync=new SyncSchedule();
 const run=promisify(execFile);
 const ROOT=path.resolve(__dirname,'..');
 const DATA=app.isPackaged?path.join(path.dirname(process.execPath),'Kindle Monitor Data'):path.join(ROOT,'runtime');
@@ -37,7 +40,7 @@ async function saveConfig(input){
   await fs.writeFile(file+'.tmp',JSON.stringify(clean,null,2),'utf8');
   await fs.rename(file+'.tmp',file);config=clean;
   weather.update(config).then(broadcast).catch(()=>{});
-  if(auto)nextPush=Date.now()+config.pushInterval*1000;
+  if(auto){sync.reset();nextPush=Date.now();}
   broadcast();return config;
 }
 async function collect(){
@@ -48,34 +51,27 @@ async function collect(){
     sample=await sensors.collect(config);history.push(sample);history=history.slice(-60);broadcast();
   }catch(e){log('采集失败：'+e.message,'error');}finally{sampling=false;}
 }
-async function renderPng(){
+async function renderPng(at=Date.now()){
   // Export without another Chromium window. Keep manual export and auto-push serialized.
   const operation=exportChain.catch(()=>{}).then(async()=>{
     if(!sample)throw new Error('请等待第一轮传感器采样');
-    return renderJob(config,sample,history,path.join(RESOURCE,'fonts'),path.join(DATA,'dashboard.png'),weather.value);
+    return renderJob(config,{...sample,at:new Date(at).toISOString()},history,path.join(RESOURCE,'fonts'),path.join(DATA,'dashboard.png'),weather.value);
   });exportChain=operation;return operation;
 }
 let pushing=false;
 async function push(){
   if(pushing)throw new Error('上一轮推送仍在进行');pushing=true;
-  try{const file=await renderPng();log('正在通过 USBNetwork 推送…');const result=await transport.push(config,file);log(result.message);return result;}
-  catch(e){log(e.message,'error');throw e;}finally{pushing=false;broadcast();}
+  const renderedAt=Date.now();
+  try{const file=await renderPng(renderedAt);log(`正在通过 ${config.connectionMode==='wifi'?'Wi-Fi':'USBNetwork'} 推送…`);const result=await transport.push(config,file);sync.success(renderedAt);nextPush=Date.now()+config.pushInterval*1000;log(result.message);return result;}
+  catch(e){sync.failure(Date.now());log(e.message,'error');throw e;}finally{pushing=false;broadcast();}
 }
-async function enableSensors(){
-  const library=path.join(RESOURCE,'lhm');
-  await fs.access(path.join(library,'LibreHardwareMonitorLib.dll'));
-  const current=await sensors.readHelper();
-  if(current?.elevated)return {message:'传感器采集器已运行'};
-  await fs.rm(path.join(DATA,'sensors.stop'),{force:true});
-  const helper=app.isPackaged?path.join(process.resourcesPath,'sensors','SensorHelper.exe'):path.join(RESOURCE,'sensors','SensorHelper.exe');
-  await fs.access(helper);
-  const quoted=value=>`'${String(value).replace(/'/g,"''")}'`;
-  const ps=path.join(process.env.SystemRoot||'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe');
-  // UAC remains a normal Windows user prompt; this app never auto-accepts it.
-  const argumentsString=`"${library}" "${DATA}"`;
-  const script=`$ErrorActionPreference='Stop'; Start-Process -FilePath ${quoted(helper)} -Verb RunAs -WindowStyle Hidden -ArgumentList ${quoted(argumentsString)}`;
-  await run(ps,['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],{windowsHide:true,timeout:60000});
-  log('已请求启动传感器采集器，等待 CPU 温度数据');return {message:'请在 Windows 提示中确认，随后等待几秒'};
+let sensorEnableTask=null;
+function enableSensors(){
+  if(sensorEnableTask)return sensorEnableTask;
+  sensorEnableTask=enableTemperature(DATA,RESOURCE,sensors,run,message=>log(message))
+    .then(async result=>{await collect();return result;})
+    .finally(()=>{sensorEnableTask=null;});
+  return sensorEnableTask;
 }
 function handle(channel,fn){ipcMain.handle(channel,async(event,...args)=>{
   if(event.sender!==window?.webContents || event.senderFrame!==window.webContents.mainFrame)throw new Error('无效来源');
@@ -98,7 +94,7 @@ function trayMenu(){
   return Menu.buildFromTemplate([
     {label:'打开控制面板',click:()=>openWindow().catch(e=>log(e.message,'error'))},
     {label:'立即推送',click:()=>push().catch(()=>{})},
-    {label:'自动推送',type:'checkbox',checked:auto,click:item=>{auto=item.checked;nextPush=auto?Date.now()+config.pushInterval*1000:0;log(auto?'已开启定时推送':'已停止定时推送');tray.setContextMenu(trayMenu());}},
+    {label:'自动推送',type:'checkbox',checked:auto,click:item=>{auto=item.checked;sync.reset();nextPush=auto?Date.now():0;log(auto?'已开启自动同步：每分钟变化必推送':'已停止自动同步');tray.setContextMenu(trayMenu());}},
     {type:'separator'},{label:'退出',click:()=>app.quit()}
   ]);
 }
@@ -119,7 +115,7 @@ app.whenReady().then(async()=>{
   });
   handle('state',state);handle('save',saveConfig);handle('test-connection',()=>transport.test(config));handle('push',push);
   handle('weather-search',name=>weather.search(name));
-  handle('auto',enabled=>{auto=Boolean(enabled);nextPush=auto?Date.now()+config.pushInterval*1000:0;if(tray)tray.setContextMenu(trayMenu());log(auto?'已开启定时推送':'已停止定时推送');return state();});
+  handle('auto',enabled=>{auto=Boolean(enabled);sync.reset();nextPush=auto?Date.now():0;if(tray)tray.setContextMenu(trayMenu());log(auto?'已开启自动同步：每分钟变化必推送':'已停止自动同步');return state();});
   handle('enable-sensors',enableSensors);
   handle('background',()=>{setTimeout(enterBackground,100);return true;});
   handle('choose-key',async()=>{const result=await dialog.showOpenDialog(window,{title:'选择本机 SSH 私钥',properties:['openFile']});return result.canceled?null:result.filePaths[0];});
@@ -138,8 +134,8 @@ app.whenReady().then(async()=>{
   const weatherTimer=setInterval(()=>weather.update(config).then(broadcast).catch(()=>{}),60000);
   const timer=setInterval(()=>collect(),3000);
   const pushTimer=setInterval(()=>{
-    if(auto&&Date.now()>=nextPush&&!pushing){nextPush=Date.now()+config.pushInterval*1000;push().catch(()=>{});}
-  },1000);
+    if(auto&&sync.due(Date.now(),nextPush)&&!pushing)push().catch(()=>{});
+  },250);
   app.on('before-quit',()=>{clearInterval(timer);clearInterval(pushTimer);clearInterval(weatherTimer);});
   if(MEMORY_BENCH){
     const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -201,12 +197,48 @@ app.whenReady().then(async()=>{
       const dimensions=require('./widgets.cjs').screen(orientation);
       const view=await window.webContents.executeJavaScript(`document.querySelector('#orientation').value=${JSON.stringify(orientation)};document.querySelector('#orientation').dispatchEvent(new Event('change'));({width:document.querySelector('#kindle-preview svg').getAttribute('width'),height:document.querySelector('#kindle-preview svg').getAttribute('height'),aspect:document.querySelector('#kindle-preview').style.aspectRatio,widgets:document.querySelectorAll('.widget-hit').length})`);
       if(view.width!==String(dimensions.width)||view.height!==String(dimensions.height)||view.widgets!==config.layouts[orientation].length)throw new Error('Orientation editor failed: '+JSON.stringify(view));
+      const zoomCheck=await window.webContents.executeJavaScript(`(()=>{
+        const widgets=JSON.stringify(draft.widgets),viewport=document.querySelector('#preview-viewport'),preview=document.querySelector('#kindle-preview');
+        document.querySelector('#preview-fit').click();
+        const fit=preview.getBoundingClientRect();
+        const fitted=fit.width<=viewport.clientWidth&&fit.height<=viewport.clientHeight;
+        document.querySelector('#preview-actual').click();
+        const actual=preview.getBoundingClientRect();
+        const nativeSize=Math.abs(actual.width-${dimensions.width})<1&&Math.abs(actual.height-${dimensions.height})<1;
+        document.querySelector('#preview-zoom-in').click();
+        const zoomed=Math.abs(preview.getBoundingClientRect().width-${dimensions.width}*1.25)<1;
+        const editable=preview.querySelectorAll('.widget-hit').length===draft.widgets.length;
+        viewport.focus();
+        viewport.dispatchEvent(new WheelEvent('wheel',{ctrlKey:true,deltaY:100,clientX:actual.left+100,clientY:actual.top+100,bubbles:true,cancelable:true}));
+        const wheelZoomed=Math.abs(preview.getBoundingClientRect().width-${dimensions.width}*1.15)<1;
+        document.querySelector('#preview-fit').click();
+        const fittedAgain=preview.getBoundingClientRect().height<=viewport.clientHeight;
+        return{fitted,nativeSize,zoomed,editable,wheelZoomed,fittedAgain,noDialog:!document.querySelector('#preview-dialog'),layoutUnchanged:JSON.stringify(draft.widgets)===widgets};
+      })()`);
+      if(Object.values(zoomCheck).some(value=>!value))throw new Error('Preview zoom failed: '+JSON.stringify(zoomCheck));
       await window.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
       await fs.writeFile(path.join(DATA,`editor-${orientation}.png`),(await window.webContents.capturePage()).toPNG());
       await renderJob({...config,orientation,widgets:config.layouts[orientation]},sample,history,path.join(RESOURCE,'fonts'),path.join(DATA,`dashboard-${orientation}.png`),weather.value);
-      orientationChecks.push({orientation,...view});
+      orientationChecks.push({orientation,...view,zoom:zoomCheck});
     }
     await fs.writeFile(path.join(DATA,'smoke-orientations.json'),JSON.stringify(orientationChecks,null,2));
+    const customization=await window.webContents.executeJavaScript(`(()=>{
+      const original=structuredClone(draft);
+      selected=draft.widgets.find(w=>w.type==='note').id;renderEditor();
+      const note=document.querySelector('#widget-content');note.value='第一行\\n第二行';note.dispatchEvent(new Event('input'));
+      const noteSaved=M.sanitize(draft).widgets.find(w=>w.id===selected).content==='第一行\\n第二行';
+      document.querySelector('.nav[data-tab="connection"]').click();
+      document.querySelector('#connection-mode').value='wifi';document.querySelector('#connection-mode').dispatchEvent(new Event('change'));
+      document.querySelector('#wifi-host').value='192.168.1.123';document.querySelector('#interval').value='7';
+      const wifiVisible=!document.querySelector('#wifi-address-field').classList.contains('hidden');
+      const usbDisabled=document.querySelector('#host').disabled;
+      const seconds=Number(document.querySelector('#interval').value);
+      draft=original;editing=false;fillForms();updatePreview();
+      return{noteSaved,wifiVisible,usbDisabled,customSeconds:seconds===7};
+    })()`);
+    if(Object.values(customization).some(value=>!value))throw new Error('Customization UI failed: '+JSON.stringify(customization));
+    await fs.writeFile(path.join(DATA,'smoke-customization.json'),JSON.stringify(customization,null,2));
+    await fs.writeFile(path.join(DATA,'connection-preview.png'),(await window.webContents.capturePage()).toPNG());
     const before=sample.at,execute=transport.execute;let backgroundSent=false;
     enterBackground();transport.execute=async(file)=>{if(file.endsWith('scp.exe'))backgroundSent=true;return{stdout:''};};
     auto=true;nextPush=Date.now();

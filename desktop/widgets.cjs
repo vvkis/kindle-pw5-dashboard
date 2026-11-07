@@ -35,7 +35,9 @@
    ids.add(w.id);
    for(const key of ['x','y','w','h'])if(!Number.isInteger(w[key]))throw new Error('组件需对齐网格');
    if(w.x<0||w.y<0||w.w<1||w.h<1||w.x+w.w>grid.columns||w.y+w.h>grid.rows)throw new Error('组件超出桌面范围');
-   return {id:w.id,type:w.type,label:String(w.label||TYPES[w.type]).slice(0,20),x:w.x,y:w.y,w:w.w,h:w.h};
+   const out={id:w.id,type:w.type,label:String(w.label||TYPES[w.type]).slice(0,20),x:w.x,y:w.y,w:w.w,h:w.h};
+   if(w.type==='note'&&w.content!==undefined)out.content=String(w.content).replace(/\r\n?/g,'\n').replace(/[\x00-\x09\x0b-\x1f]/g,' ').slice(0,2000);
+   return out;
   });
   for(let i=0;i<out.length;i++)for(let j=i+1;j<out.length;j++)if(intersects(out[i],out[j]))throw new Error('组件不能重叠');
   return out;
@@ -69,7 +71,7 @@
   const rounded=(x,y,w,h,fill='#fff',stroke='none',radius=22)=>`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${radius}" fill="${fill}" stroke="${stroke}" stroke-width="2"/>`;
   const rule=(x,y,w,color='#c6c6c6')=>`<path d="M${x} ${y}h${w}" stroke="${color}" fill="none"/>`;
   const sun=(x,y,r,color='#fff')=>{let out=`<circle cx="${x}" cy="${y}" r="${r*.43}" fill="none" stroke="${color}" stroke-width="3"/>`;for(let i=0;i<8;i++){const a=i*Math.PI/4;out+=`<path d="M${x+Math.cos(a)*r*.7} ${y+Math.sin(a)*r*.7}L${x+Math.cos(a)*r} ${y+Math.sin(a)*r}" stroke="${color}" stroke-width="3" stroke-linecap="round"/>`;}return out;};
-  let body=`<rect width="${page.width}" height="${page.height}" fill="#fff"/><g fill="#161616" font-family="Maple Mono NF CN,monospace">`;
+  let body=`<rect width="${page.width}" height="${page.height}" fill="#fff"/><g fill="#161616" font-family="Maple Mono NF CN,monospace" font-weight="${config.fontWeight===400?400:700}">`;
   body+=text(64,76,config.title,25,'',850)+text(page.width-256,76,'DESK / 01',18);
   for(const widget of validate(config.widgets||defaults(config.orientation),config.orientation)){
    const r=rect(widget,config.orientation),x=r.x,y=r.y,w=r.width,h=r.height,compact=h<260,narrow=w<400,pad=narrow?20:30;
@@ -97,8 +99,8 @@
    }else if(widget.type==='note'){
     body+=`<path d="M${x} ${y}h${w-30}l30 30v${h-30}H${x}Z" fill="#fafafa" stroke="#b9b9b9" stroke-width="1.5"/><path d="M${x+w-30} ${y}v30h30" fill="none" stroke="#b9b9b9"/>`;
     body+=text(x+pad,y+35,widget.label,18,'',w-pad*2);
-    const chars=Math.max(3,Math.floor((w-pad*2)/23)),phrases=(config.note||'').split(/(?<=[，。！？；])/u).filter(Boolean),lines=[];
-    for(const phrase of phrases){const letters=Array.from(phrase);while(letters.length)lines.push(letters.splice(0,chars).join(''));}
+    const chars=Math.max(3,Math.floor((w-pad*2)/23)),paragraphs=(widget.content??config.note??'').split('\n'),lines=[];
+    for(const paragraph of paragraphs){const letters=Array.from(paragraph);if(!letters.length)lines.push('');while(letters.length)lines.push(letters.splice(0,chars).join(''));}
     for(let i=0;i<Math.min(Math.floor((h-70)/35),lines.length);i++){body+=text(x+pad,y+83+i*35,lines[i],22,'',w-pad*2);body+=rule(x+pad,y+91+i*35,w-pad*2,'#dedede');}
    }else if(widget.type==='cpuTemp'&&!compact){
     body+=rounded(x,y,w,h,'#f6f6f6');body+=text(x+pad,y+49,widget.label,24,'',w-pad*2);
@@ -138,7 +140,7 @@
   }
   body+=text(64,page.height-103,config.note,20,'',page.width-386);
   body+=`<path d="M64 ${page.height-76}H${page.width-64}" stroke="#222" stroke-width="2"/>`;
-  body+=text(64,page.height-37,`${sample?.hostname||'LOCAL PC'} · ${at.toLocaleTimeString('zh-CN',{hour12:false})}`,18,'',page.width-536)+text(page.width-436,page.height-37,'天气 / Open-Meteo',14)+text(page.width-158,page.height-37,'PW5',18);
+  body+=text(64,page.height-37,`更新于 ${at.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false})}`,18,'',page.width-536)+text(page.width-436,page.height-37,'天气 / Open-Meteo',14)+text(page.width-158,page.height-37,'PW5',18);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${page.width}" height="${page.height}" viewBox="0 0 ${page.width} ${page.height}">${body}</g></svg>`;
  }
  return{TYPES,GRID,screen,defaults,validate,rect,move,findSpace,svg};

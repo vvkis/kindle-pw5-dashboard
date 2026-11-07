@@ -7,6 +7,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Web.Script.Serialization;
 using LibreHardwareMonitor.Hardware;
+using Microsoft.Win32;
 
 // Small CLR host for the same unmodified sensor library. No PowerShell stays resident.
 class SensorHelper {
@@ -21,11 +22,13 @@ class SensorHelper {
         };
         return Run(Path.GetFullPath(args[1]));
     }
-    static void Collect(IHardware hardware,List<object> sensors) {
+    static void Collect(IHardware hardware,List<object> sensors,ref bool cpuAvailable) {
         hardware.Update();
-        foreach(ISensor sensor in hardware.Sensors)if(sensor.Value.HasValue)
+        foreach(ISensor sensor in hardware.Sensors)if(sensor.Value.HasValue) {
             sensors.Add(new {id=sensor.Identifier.ToString(),name=sensor.Name,type=sensor.SensorType.ToString(),value=sensor.Value.Value});
-        foreach(IHardware child in hardware.SubHardware)Collect(child,sensors);
+            if(sensor.SensorType==SensorType.Temperature&&sensor.Identifier.ToString().IndexOf("cpu",StringComparison.OrdinalIgnoreCase)>=0&&sensor.Value.Value>0&&sensor.Value.Value<150)cpuAvailable=true;
+        }
+        foreach(IHardware child in hardware.SubHardware)Collect(child,sensors,ref cpuAvailable);
     }
     static void Write(string file,object value,JavaScriptSerializer json) {
         string temp=file+".tmp";
@@ -40,15 +43,21 @@ class SensorHelper {
         string stop=Path.Combine(runtime,"sensors.stop"),output=Path.Combine(runtime,"sensors.json"),heartbeat=Path.Combine(runtime,"heartbeat");
         var json=new JavaScriptSerializer();Computer computer=null;FileStream fileLock=null;
         bool elevated=new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
+        string driverVersion=null;
+        using(var key=Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO")) {
+            if(key!=null)driverVersion=key.GetValue("DisplayVersion") as string;
+        }
         try {
             try{fileLock=new FileStream(Path.Combine(runtime,"sensors.lock"),FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None);}catch(IOException){return 0;}
             computer=new Computer {IsCpuEnabled=true,IsGpuEnabled=true};computer.Open();
             while(!File.Exists(stop)) {
                 if(File.Exists(heartbeat)&&(DateTime.UtcNow-File.GetLastWriteTimeUtc(heartbeat)).TotalSeconds>45)break;
                 try {
-                    var sensors=new List<object>();var gpus=new List<object>();
-                    foreach(IHardware hardware in computer.Hardware){Collect(hardware,sensors);if(hardware.HardwareType.ToString().StartsWith("Gpu"))gpus.Add(new{id=hardware.Identifier.ToString(),name=hardware.Name});}
-                    Write(output,new {at=DateTime.UtcNow.ToString("o"),elevated=elevated,sensors=sensors,gpus=gpus,error=(string)null},json);
+                    var sensors=new List<object>();var gpus=new List<object>();bool cpuAvailable=false;
+                    foreach(IHardware hardware in computer.Hardware){Collect(hardware,sensors,ref cpuAvailable);if(hardware.HardwareType.ToString().StartsWith("Gpu"))gpus.Add(new{id=hardware.Identifier.ToString(),name=hardware.Name});}
+                    string error=cpuAvailable?null:!elevated?"请点击启用 CPU 温度并完成管理员授权。":driverVersion==null?"CPU 温度组件尚未准备好，请点击启用 CPU 温度自动完成配置。":"驱动已安装，但暂未读到有效 CPU 温度，请重新启用采集器。";
+                    string errorCode=cpuAvailable?null:!elevated?"not-elevated":driverVersion==null?"driver-missing":"cpu-unavailable";
+                    Write(output,new {at=DateTime.UtcNow.ToString("o"),elevated=elevated,sensors=sensors,gpus=gpus,driver=new{name="PawnIO",version=driverVersion,installed=driverVersion!=null},error=error,errorCode=errorCode},json);
                 }catch(Exception error){Write(output,new {at=DateTime.UtcNow.ToString("o"),elevated=elevated,sensors=new object[0],error=error.Message},json);}
                 for(int i=0;i<15&&!File.Exists(stop);i++)Thread.Sleep(200);
             }

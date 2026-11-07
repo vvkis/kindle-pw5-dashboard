@@ -47,6 +47,6 @@
 - 关闭界面硬件加速降低 GPU 进程占用；PNG 由短命 utility 进程导出，字体与栅格化分配随进程退出释放。这会增加每次导出的进程启动开销，以换取更低的常驻内存。
 - 上表不包含 PNG 导出时临时进程的峰值，也不包含真实 USB/SSH 设备负载。任务管理器采用的内存列可能与私有提交量不同，工作集也一并列出，避免混淆。
 
-运行 `pnpm benchmark:memory` 复现前台 → 托盘后台 → 恢复界面的测量，原始报告在 `runtime/benchmark-memory.json`。运行 `scripts/benchmark-helper.ps1` 测试原生宿主，报告在 `out/benchmark-helper-native.json`；加 `-Legacy` 可对比旧 PowerShell 宿主。
+运行 `pnpm benchmark:memory` 复现前台 → 托盘后台 → 恢复界面的测量，原始报告在 `runtime/benchmark-memory.json`。运行 `scripts/benchmark-helper.ps1` 测试原生宿主，报告在 `out/benchmark-helper-native.json`。旧 PowerShell 宿主已经移除，上述旧版数值仅保留为历史测量记录。
 
 实现参考：[Electron 硬件加速与进程指标](https://www.electronjs.org/docs/latest/api/app)、[临时 utilityProcess](https://www.electronjs.org/docs/latest/api/utility-process)。

@@ -14,7 +14,7 @@
   };
   const defaults = () => ({
     title: '工作站监控', note: '保持专注，保持冷静。',
-    host: '192.168.15.244', port: 22, identityFile: '', pushInterval: 60,
+    host: '192.168.15.244', wifiHost: '', connectionMode: 'usb', port: 22, identityFile: '', pushInterval: 60, fontWeight: 700,
     cpuSensor: '', layout: 'cards', showChart: true,
     weather: { name: '广州', latitude: 23.1291, longitude: 113.2644, enabled: true },
     widgets: Widgets.defaults(),
@@ -32,7 +32,14 @@
       if (!/^[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}$/.test(input.host)) throw new Error('设备地址应为 IPv4 或主机名');
       out.host = input.host;
     }
-    for (const [key,min,max] of [['port',1,65535],['pushInterval',10,3600]]) {
+    if(input.connectionMode!==undefined&&!['usb','wifi'].includes(input.connectionMode))throw new Error('无效的连接模式');
+    out.connectionMode=input.connectionMode||'usb';
+    if(input.wifiHost!==undefined){
+      if(input.wifiHost!==''&&!/^[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}$/.test(input.wifiHost))throw new Error('Wi-Fi 地址应为 IPv4 或主机名');
+      out.wifiHost=input.wifiHost;
+    }
+    if(input.fontWeight!==undefined){if(![400,700].includes(Number(input.fontWeight)))throw new Error('无效的字体粗细');out.fontWeight=Number(input.fontWeight);}
+    for (const [key,min,max] of [['port',1,65535],['pushInterval',1,3600]]) {
       if (input[key] !== undefined) {
         if (!Number.isInteger(Number(input[key])) || Number(input[key]) < min || Number(input[key]) > max) throw new Error(`${key} 超出范围`);
         out[key] = Number(input[key]);
@@ -48,6 +55,8 @@
     }
     out.widgets=input.widgets!==undefined?Widgets.validate(input.widgets,out.orientation):out.layouts[out.orientation];
     out.layouts[out.orientation]=out.widgets.map(widget=>({...widget}));
+    for(const orientation of ['portrait','landscape'])out.layouts[orientation]=out.layouts[orientation].map(widget=>widget.type==='note'&&widget.content===undefined?{...widget,content:out.note}:widget);
+    out.widgets=out.layouts[out.orientation];
     if(input.weather) {
       const w=input.weather;
       if(!Number.isFinite(Number(w.latitude))||Math.abs(Number(w.latitude))>90||!Number.isFinite(Number(w.longitude))||Math.abs(Number(w.longitude))>180)throw new Error('天气坐标无效');

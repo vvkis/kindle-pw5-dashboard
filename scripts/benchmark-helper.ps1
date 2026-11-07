@@ -1,17 +1,12 @@
-param([int]$Seconds=60,[switch]$Legacy)
+param([int]$Seconds=60)
 $ErrorActionPreference='Stop'
 $root=Split-Path -Parent $PSScriptRoot
-$name=if($Legacy){'legacy'}else{'native'}
+$name='native'
 $dir=Join-Path $root ('runtime/helper-benchmark-'+$name)
 New-Item -ItemType Directory -Force $dir | Out-Null
 Remove-Item -LiteralPath (Join-Path $dir 'sensors.stop') -Force -ErrorAction SilentlyContinue
-if($Legacy){
-    $arguments=@('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',('"'+(Join-Path $root 'desktop/sensor-helper.ps1')+'"'),'-LibraryDir',('"'+(Join-Path $root 'vendor/lhm')+'"'),'-RuntimeDir',('"'+$dir+'"'))
-    $process=Start-Process powershell.exe -ArgumentList $arguments -WindowStyle Hidden -PassThru
-}else{
-    $arguments=@(('"'+(Join-Path $root 'vendor/lhm')+'"'),('"'+$dir+'"'))
-    $process=Start-Process (Join-Path $root 'vendor/sensors/SensorHelper.exe') -ArgumentList $arguments -WindowStyle Hidden -PassThru
-}
+$arguments=@(('"'+(Join-Path $root 'vendor/lhm')+'"'),('"'+$dir+'"'))
+$process=Start-Process (Join-Path $root 'vendor/sensors/SensorHelper.exe') -ArgumentList $arguments -WindowStyle Hidden -PassThru
 try {
     Start-Sleep -Seconds 10
     $process.Refresh()

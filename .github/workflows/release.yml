@@ -1,0 +1,60 @@
+name: Build Windows release draft
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-release:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Check release version
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($env:GITHUB_REF_NAME -ne "v$version") { throw 'Tag must match package.json version.' }
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Prepare verified build assets
+        run: pnpm prepare:assets
+      - name: Run tests
+        run: pnpm test
+      - name: Check desktop rendering and editing
+        run: pnpm smoke
+      - name: Build clean Windows ZIP
+        run: pnpm release
+      - name: Create draft and upload ZIP with checksum
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $asset = "dist/Kindle-Monitor-$version-win-x64.zip"
+          $checksum = "$asset.sha256"
+          $hash = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $([IO.Path]::GetFileName($asset))" | Set-Content -LiteralPath $checksum -Encoding ascii
+          $notes = "docs/releases/$($env:GITHUB_REF_NAME).md"
+          if (!(Test-Path -LiteralPath $notes)) { throw 'Release notes missing.' }
+          $existing = gh release view $env:GITHUB_REF_NAME --repo $env:GITHUB_REPOSITORY --json isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            if (!(($existing | ConvertFrom-Json).isDraft)) { throw 'Refusing to replace an already published release.' }
+            gh release upload $env:GITHUB_REF_NAME $asset $checksum --repo $env:GITHUB_REPOSITORY --clobber
+          } else {
+            gh release create $env:GITHUB_REF_NAME $asset $checksum --repo $env:GITHUB_REPOSITORY --verify-tag --target $env:GITHUB_SHA --draft --title "Kindle Monitor $($env:GITHUB_REF_NAME)" --notes-file $notes
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Draft release upload failed.' }

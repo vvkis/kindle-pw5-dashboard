@@ -23,15 +23,17 @@ function deviceImage(buffer,config){
 }
 function argsFor(config) {
   const c=sanitize(config);
+  const host=c.connectionMode==='wifi'?c.wifiHost:c.host;
+  if(!host)throw new Error('请填写 Kindle 的 Wi-Fi 地址');
   const args=['-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=5','-o','ServerAliveInterval=5','-o','ServerAliveCountMax=2'];
   if(c.identityFile) args.push('-i',c.identityFile);
-  return {c,args,target:`root@${c.host}`};
+  return {c,args,target:`root@${host}`};
 }
 function explain(error) {
   const raw=String(error.stderr||error.message||error).trim();
   if(/Host key verification failed/.test(raw)) return '主机密钥尚未信任或已变化。请先核对设备指纹并用 SSH 完成首次登录。';
   if(/Permission denied/.test(raw)) return 'SSH 认证失败，请检查私钥与 Kindle authorized_keys。';
-  if(/timed out|unreachable|refused|killed/i.test(raw)) return 'USB 连接不可达。请检查 USBNetwork、地址，并唤醒 Kindle。';
+  if(/timed out|unreachable|refused|killed/i.test(raw)) return '设备连接不可达。请检查所选网络、SSH 地址和端口，并唤醒 Kindle；Wi-Fi 模式需两端处于可互通的局域网且设备已开放无线 SSH。';
   return raw.slice(-1500);
 }
 class Transport {

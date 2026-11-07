@@ -1,6 +1,6 @@
 /* global MonitorModel, DesktopWidgets */
 const $=id=>document.getElementById(id), M=MonitorModel, W=DesktopWidgets;
-let state=null,draft=null,editing=false,toastTimer,cityResults=[],selected='clock',activeTab='overview',dragging=false;
+let state=null,draft=null,editing=false,toastTimer,cityResults=[],selected='clock',activeTab='overview',dragging=false,enablingSensors=false;
 function toast(message,error=false){$('toast').textContent=message;$('toast').className='toast'+(error?' error':'');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.add('hidden'),6500);}
 async function call(method,...args){const result=await window.kindle[method](...args);if(!result.ok)throw new Error(result.error);return result.data;}
 async function action(button,fn){const old=button.textContent;button.disabled=true;try{await fn();}catch(error){toast(error.message,true);}finally{button.disabled=false;button.textContent=old;}}
@@ -22,7 +22,8 @@ function updatePreview(){
  const preview=$('kindle-preview');preview.style.aspectRatio=page.width+'/'+page.height;
  const panel=document.querySelector('.preview-panel');panel.classList.toggle('landscape',draft.orientation==='landscape');panel.classList.toggle('landscape-top-right',draft.landscapeTop==='right');
  $('preview-direction').textContent='PW5 · '+(draft.orientation==='landscape'?'横屏':'竖屏');$('preview-resolution').textContent=page.width+' × '+page.height+' / 灰阶';$('device-resolution').textContent=page.width+' × '+page.height+' · 灰阶墨水屏';
- preview.innerHTML=M.dashboardSvg(draft||state.config,state.sample,state.history,state.weather);
+ preview.innerHTML=M.dashboardSvg(draft||state.config,{...state.sample,at:new Date().toISOString()},state.history,state.weather);
+ applyPreviewZoom();
  if(activeTab!=='editor')return;
  const overlay=document.createElement('div');overlay.className='widget-overlay';
  for(const widget of draft.widgets){
@@ -51,19 +52,18 @@ function update(next){
  const cpu=state.sample?.values.cpuTemp;
  $('sensor-heading').textContent=cpu==null?'连接 CPU 温度传感器':'CPU 温度已连接';
  $('sensor-message').textContent=state.sample?.messages.join(' ')||`数据来源：${state.sample?.sources.cpu||'采样中'}`;
- $('enable-sensors').textContent=cpu==null?'启用 CPU 温度':'采集器运行中';
+ $('enable-sensors').textContent=enablingSensors?'正在启用…':cpu==null?'启用 CPU 温度':'采集器运行中';
  $('auto').checked=state.auto;
- $('sync-info').textContent=state.auto?`每 ${state.config.pushInterval} 秒推送一次`:'已暂停 · 不会自动连接设备';
+ $('sync-info').textContent=state.auto?`每分钟变化必推送 · 数据每 ${state.config.pushInterval} 秒`:'已暂停 · 不会自动连接设备';
  $('logs').replaceChildren(...state.logs.slice(0,12).map(log=>{const row=document.createElement('div');row.className='log '+log.level;const time=document.createElement('time');time.textContent=new Date(log.at).toLocaleTimeString('zh-CN',{hour12:false});const text=document.createElement('span');text.textContent=log.message;row.append(time,text);return row;}));
  if(!editing)fillForms();
 }
 function fillForms(){
  if(!draft)return;
  for(const id of ['title','note','host','port'])$(id).value=draft[id];
- $('identity-file').value=draft.identityFile;
+ $('identity-file').value=draft.identityFile;$('connection-mode').value=draft.connectionMode;$('wifi-host').value=draft.wifiHost;$('font-weight').value=draft.fontWeight;renderConnection();
  $('orientation').value=draft.orientation;$('landscape-top').value=draft.landscapeTop;$('landscape-placement').classList.toggle('hidden',draft.orientation!=='landscape');
  $('weather-name').value=draft.weather.name;$('latitude').value=draft.weather.latitude;$('longitude').value=draft.weather.longitude;$('show-weather').checked=draft.weather.enabled;
- if(!Array.from($('interval').options).some(o=>Number(o.value)===draft.pushInterval))$('interval').add(new Option(draft.pushInterval+' 秒',draft.pushInterval));
  $('interval').value=draft.pushInterval;
  $('cpu-sensor').replaceChildren(new Option('自动选择 CPU Package / Tctl/Tdie',''),...(state.sample?.sensors||[]).filter(s=>/cpu/i.test(s.id)).map(s=>new Option(`${s.name} · ${M.format(s.value)}°C`,s.id)));
  if(draft.cpuSensor&&!Array.from($('cpu-sensor').options).some(o=>o.value===draft.cpuSensor))$('cpu-sensor').add(new Option(draft.cpuSensor,draft.cpuSensor));
@@ -74,6 +74,8 @@ function renderEditor(){
  $('widgets-list').replaceChildren(...draft.widgets.map(widget=>{const b=document.createElement('button');b.className='widget-chip'+(widget.id===selected?' selected':'');b.textContent=widget.label;b.onclick=()=>{selected=widget.id;renderEditor();updatePreview();};return b;}));
  const current=draft.widgets.find(w=>w.id===selected);$('widget-inspector').classList.toggle('hidden',!current);
  for(const option of $('widget-size').options)option.disabled=Number(option.value.split(',')[0])>W.screen(draft.orientation).grid.columns;
+ $('note-content-field').classList.toggle('hidden',current?.type!=='note');
+ if(current?.type==='note')$('widget-content').value=current.content??draft.note;
  if(current){$('widget-label').value=current.label;$('widget-size').value=current.w+','+current.h;}
 }
 document.querySelectorAll('.nav').forEach(button=>button.onclick=()=>{
@@ -83,28 +85,28 @@ document.querySelectorAll('.nav').forEach(button=>button.onclick=()=>{
  document.querySelector('.content-grid').classList.toggle('edit-mode',tab==='editor');
  for(const name of ['overview','editor','connection'])$(name+'-panel').classList.toggle('hidden',tab!==name);
  $('page-name').textContent=button.textContent.trim().slice(1).trim();
- const headings={overview:['桌面一览','时间、天气与电脑状态，都在这里。'],editor:['编辑桌面','像整理手机桌面一样，安排每一块小组件。'],connection:['连接 Kindle','通过 USBNetwork，传送每一次更新。']};
+ const headings={overview:['桌面一览','时间、天气与电脑状态，都在这里。'],editor:['编辑桌面','像整理手机桌面一样，安排每一块小组件。'],connection:['连接 Kindle','通过 USB 或 Wi-Fi，同步每一次更新。']};
  $('heading').textContent=headings[tab][0];$('subtitle').textContent=headings[tab][1];
  updatePreview();
 });
 for(const id of ['title','note'])$(id).addEventListener('input',()=>{draft[id]=$(id).value;editing=true;updatePreview();});
-for(const id of ['host','port','identity-file','interval','cpu-sensor'])$(id).addEventListener('input',()=>{editing=true;});
+for(const id of ['host','wifi-host','port','identity-file','interval','cpu-sensor'])$(id).addEventListener('input',()=>{editing=true;});
 async function saveAll(){
- const clean={...draft,title:$('title').value,note:$('note').value,host:$('host').value.trim(),port:Number($('port').value),identityFile:$('identity-file').value.trim(),pushInterval:Number($('interval').value),cpuSensor:$('cpu-sensor').value,weather:{name:$('weather-name').value,latitude:Number($('latitude').value),longitude:Number($('longitude').value),enabled:$('show-weather').checked}};
+ const clean={...draft,title:$('title').value,note:$('note').value,connectionMode:$('connection-mode').value,wifiHost:$('wifi-host').value.trim(),fontWeight:Number($('font-weight').value),host:$('host').value.trim(),port:Number($('port').value),identityFile:$('identity-file').value.trim(),pushInterval:Number($('interval').value),cpuSensor:$('cpu-sensor').value,weather:{name:$('weather-name').value,latitude:Number($('latitude').value),longitude:Number($('longitude').value),enabled:$('show-weather').checked}};
  draft=await call('save',clean);editing=false;toast('设置已保存');updatePreview();
 }
 $('save-editor').onclick=()=>action($('save-editor'),saveAll);$('save-connection').onclick=()=>action($('save-connection'),saveAll);
 $('add-widget').replaceChildren(...Object.entries(W.TYPES).map(([key,label])=>new Option(label,key)));
-$('add').onclick=()=>{const type=$('add-widget').value,space=W.findSpace(draft.widgets,2,1,draft.orientation);if(!space){toast('桌面空间不足，请先缩小或移除一个组件');return;}const widget={id:'widget-'+Date.now(),type,label:W.TYPES[type],...space,w:2,h:1};draft.widgets.push(widget);selected=widget.id;editing=true;renderEditor();updatePreview();};
+$('add').onclick=()=>{const type=$('add-widget').value,space=W.findSpace(draft.widgets,2,1,draft.orientation);if(!space){toast('桌面空间不足，请先缩小或移除一个组件');return;}const widget={id:'widget-'+Date.now(),type,label:W.TYPES[type],...space,w:2,h:1,...(type==='note'?{content:''}:{})};draft.widgets.push(widget);selected=widget.id;editing=true;renderEditor();updatePreview();};
 $('widget-label').oninput=()=>{const widget=draft.widgets.find(w=>w.id===selected);if(!widget)return;widget.label=$('widget-label').value;editing=true;updatePreview();};
 $('widget-size').onchange=()=>{const size=$('widget-size').value.split(',').map(Number);try{draft.widgets=W.validate(draft.widgets.map(w=>w.id===selected?{...w,w:size[0],h:size[1]}:w),draft.orientation);editing=true;updatePreview();}catch(error){toast('该大小会重叠或越界，请先腾出空间',true);}renderEditor();};
 $('remove-widget').onclick=()=>{draft.widgets=draft.widgets.filter(w=>w.id!==selected);selected=draft.widgets[0]?.id;editing=true;renderEditor();updatePreview();};
 for(const [id,dx,dy]of [['move-left',-1,0],['move-up',0,-1],['move-down',0,1],['move-right',1,0]])$(id).onclick=()=>{const w=draft.widgets.find(w=>w.id===selected);if(!w)return;try{draft.widgets=W.move(draft.widgets,w.id,w.x+dx,w.y+dy,draft.orientation);editing=true;updatePreview();}catch(error){toast(error.message,true);}renderEditor();};
-$('test').onclick=()=>action($('test'),async()=>{await saveAll();const result=await call('test');$('device-state').textContent='USBNetwork 已连接';$('device-dot').classList.add('connected');toast(result.message);});
+$('test').onclick=()=>action($('test'),async()=>{await saveAll();const result=await call('test');$('device-state').textContent=(draft.connectionMode==='wifi'?'Wi-Fi':'USBNetwork')+' 已连接';$('device-dot').classList.add('connected');toast(result.message);});
 $('push').onclick=()=>action($('push'),async()=>{await saveAll();await call('push');$('device-state').textContent='已成功推送';$('device-dot').classList.add('connected');toast('Kindle 已刷新');});
 $('export').onclick=()=>action($('export'),async()=>{await saveAll();if(await call('export'))toast('PNG 已导出');});
 $('auto').onchange=async()=>{const enabled=$('auto').checked;try{await saveAll();await call('auto',enabled);}catch(e){$('auto').checked=state.auto;toast(e.message,true);}};
-$('enable-sensors').onclick=()=>action($('enable-sensors'),async()=>{const result=await call('sensors');toast(result.message);});
+$('enable-sensors').onclick=()=>action($('enable-sensors'),async()=>{enablingSensors=true;$('enable-sensors').textContent='正在启用…';toast('请确认 Windows 管理员授权，程序会自动完成配置。');try{const result=await call('sensors');toast(result.message);}finally{enablingSensors=false;}});
 $('choose-key').onclick=()=>action($('choose-key'),async()=>{const file=await call('chooseKey');if(file){$('identity-file').value=file;editing=true;}});
 $('open-data').onclick=()=>call('openData').catch(e=>toast(e.message,true));
 window.kindle.onState(update);call('state').then(update).catch(e=>toast(e.message,true));
@@ -125,3 +127,42 @@ $('orientation').onchange=()=>{
 $('landscape-top').onchange=()=>{draft.landscapeTop=$('landscape-top').value;editing=true;updatePreview();};
 
 $('background').onclick=()=>action($('background'),async()=>{await saveAll();await call('background');});
+
+function renderConnection(){
+ const wifi=$('connection-mode').value==='wifi';
+ $('host').disabled=wifi;$('wifi-address-field').classList.toggle('hidden',!wifi);
+ $('connection-help').textContent=wifi?'电脑与 Kindle 请连接可互通的局域网。Kindle 需已启用无线 SSH（USBNetwork 的 Wi-Fi SSH 功能），填写设备在路由器中的无线地址后检测连接；同步时可以拔掉 USB。':'先在 Kindle 启用 USBNetwork，并配置电脑侧静态 IP 和 SSH 公钥。普通 USB 磁盘模式不能实时刷屏。';
+}
+$('connection-mode').onchange=()=>{draft.connectionMode=$('connection-mode').value;editing=true;renderConnection();$('device-state').textContent='等待检测连接';$('device-dot').classList.remove('connected');};
+$('font-weight').onchange=()=>{draft.fontWeight=Number($('font-weight').value);editing=true;updatePreview();};
+$('widget-content').oninput=()=>{const widget=draft.widgets.find(w=>w.id===selected);if(widget?.type!=='note')return;widget.content=$('widget-content').value;editing=true;updatePreview();};
+
+let previewZoom=1,previewFit=true;
+function applyPreviewZoom(){
+ if(!draft)return;
+ const page=W.screen(draft.orientation),viewport=$('preview-viewport');
+ const landscape=draft.orientation==='landscape';
+ if(previewFit)previewZoom=Math.max(.1,Math.min(2,(viewport.clientWidth-48-(landscape?50:24))/page.width,(viewport.clientHeight-48-(landscape?26:50))/page.height));
+ const preview=$('kindle-preview');preview.style.width=page.width*previewZoom+'px';preview.style.height=page.height*previewZoom+'px';
+ $('preview-zoom-value').textContent=Math.round(previewZoom*100)+'%';
+ $('preview-zoom-out').disabled=previewZoom<=.1;$('preview-zoom-in').disabled=previewZoom>=2;
+}
+function setPreviewZoom(zoom,point){
+ if(!draft||dragging)return;
+ const viewport=$('preview-viewport'),bounds=viewport.getBoundingClientRect(),before=$('kindle-preview').getBoundingClientRect();
+ const x=point?.x??bounds.left+viewport.clientWidth/2,y=point?.y??bounds.top+viewport.clientHeight/2;
+ const pixelX=(x-before.left)/previewZoom,pixelY=(y-before.top)/previewZoom;
+ previewFit=false;previewZoom=Math.max(.1,Math.min(2,zoom));applyPreviewZoom();
+ const after=$('kindle-preview').getBoundingClientRect();viewport.scrollLeft+=after.left+pixelX*previewZoom-x;viewport.scrollTop+=after.top+pixelY*previewZoom-y;
+}
+$('preview-fit').onclick=()=>{previewFit=true;applyPreviewZoom();$('preview-viewport').scrollTo(0,0);};
+$('preview-actual').onclick=()=>setPreviewZoom(1);
+$('preview-zoom-in').onclick=()=>setPreviewZoom(previewZoom+.25);
+$('preview-zoom-out').onclick=()=>setPreviewZoom(previewZoom-.25);
+$('preview-viewport').addEventListener('pointerdown',()=>$('preview-viewport').focus({preventScroll:true}),true);
+$('preview-viewport').addEventListener('wheel',event=>{if(!event.ctrlKey)return;event.preventDefault();if(!$('preview-viewport').matches(':focus-within'))return;setPreviewZoom(previewZoom+(event.deltaY<0?.1:-.1),{x:event.clientX,y:event.clientY});},{passive:false});
+$('preview-viewport').addEventListener('keydown',event=>{
+ if(event.key==='+'||event.key==='='){event.preventDefault();setPreviewZoom(previewZoom+.25);}
+ if(event.key==='-'){event.preventDefault();setPreviewZoom(previewZoom-.25);}
+});
+new ResizeObserver(()=>{if(previewFit)applyPreviewZoom();}).observe($('preview-viewport'));

@@ -13,3 +13,54 @@ main{margin-left:195px;padding:0 32px 24px}header{height:64px;color:#858d80}.bre
 .content-grid.edit-mode{grid-template-columns:365px minmax(0,1fr)}.edit-mode .preview-surface{padding:24px}.edit-mode .kindle-device{max-width:385px}.edit-mode .preview-panel{padding:21px 26px}.edit-mode .editor-card{padding:18px}.edit-mode .list-heading{font-size:10px}.edit-mode .list-heading>span{font-size:8px}.weather-details{font-size:11px;color:#73866a;margin:17px 0;line-height:1.8}.weather-details[open]{padding-bottom:12px}.weather-details summary{cursor:pointer;margin-bottom:10px}.weather-details label{display:block;font-size:10px;margin-top:12px}.weather-details label input{margin-top:6px}.weather-details>.field-row{margin:10px 0}.weather-details .check-label{margin-top:0}.edit-mode .widget-chip{font-size:9px;padding:7px 9px}@media(max-width:1250px){.content-grid.edit-mode{grid-template-columns:330px minmax(0,1fr)}.edit-mode .kindle-device{max-width:350px}}
 
 .preview-panel.landscape .kindle-device{display:flex;align-items:stretch;max-width:630px;padding:12px 0 12px 12px;border-radius:16px}.preview-panel.landscape .kindle-screen{flex:1;min-width:0;aspect-ratio:1648/1236}.preview-panel.landscape .kindle-chin{width:34px;height:auto;writing-mode:vertical-rl;letter-spacing:2px;flex-shrink:0}.preview-panel.landscape.landscape-top-right .kindle-device{flex-direction:row-reverse;padding:12px 12px 12px 0}.edit-mode .preview-panel.landscape .kindle-device{max-width:650px}.edit-mode .preview-panel.landscape .preview-surface{padding:26px 16px}
+
+/* Readable desktop typography; the bundled Maple face remains on the e-ink canvas. */
+body{font-family:"Segoe UI","Microsoft YaHei UI","Microsoft YaHei",sans-serif;font-size:14px;font-weight:500;line-height:1.5}
+button,input,select,textarea{font:inherit}
+input,select,textarea{font-size:14px}
+textarea{display:block;resize:vertical;width:100%;min-height:120px;border:1px solid #c5cebc;border-radius:7px;padding:11px 12px;background:#f5f7f0;color:#263b28;outline:none;margin-top:9px;line-height:1.7}
+textarea:focus{border-color:#688850}
+.nav{font-size:14px;font-weight:600}.button{font-size:13px;font-weight:600}.button.small{font-size:12px}
+h1{font-size:28px;font-weight:700;letter-spacing:0}.section-title h2{font-size:15px;font-weight:700}
+.page-heading p{font-size:14px;color:#596650}.section-title>span{font-size:12px;color:#66745c}
+.eyebrow,.tiny-label,.version{font-size:10px}.sidebar-note strong{font-size:12px}.sidebar-note>span,.device-status,.data-folder{font-size:12px}
+.day-date,.weather-location{font-size:13px;color:#52694a}.clock,.tile-value{font-weight:700;font-variant-numeric:tabular-nums}.clock{letter-spacing:-1px}
+.day-greeting,.weather-description{font-size:12px;color:#596f4f}.weather-source{font-size:10px;color:#627457}.weather-current strong{font-weight:700}
+.tile-label{font-size:13px;font-weight:600;color:#526448}.tile-footer{font-size:11px;color:#6a795e}.tile-unit{font-size:14px;color:#647558}
+.sensor-banner strong{font-size:13px;color:#4d6443}.sensor-banner p,.sensor-banner .button,.hardware-line{font-size:11px;color:#617454}
+.preview-caption,.preview-footnote{font-size:11px;color:#5e7052}.sync-card strong{font-size:14px;font-weight:700}.sync-card p{font-size:12px;color:#596e4d;max-width:260px}.sync-card{gap:12px}.toggle{flex-shrink:0}
+.editor-card>label,.widget-inspector>label,.weather-details label,.weather-details,.list-heading,.edit-mode .list-heading{font-size:13px;color:#4f6445}
+.help,.list-heading>span,.edit-mode .list-heading>span{font-size:12px;color:#5e7052}.help{display:block;line-height:1.8}.sync-rule{background:#eaf1e1;border-radius:7px;padding:12px}
+.widget-chip,.edit-mode .widget-chip{font-size:12px;font-weight:600;color:#536d42}.log{font-size:12px;color:#53684a}.log time{color:#6a785f}.editor-card input,.editor-card select{color:#2f4428;border-color:#cbd5c1}
+@media(max-width:1250px){.content-grid{grid-template-columns:minmax(365px,1fr) 330px}.weather-hero{min-width:145px}.day-hero{gap:10px}.clock{font-size:47px}.preview-panel{padding:16px}.heading-actions .button{font-size:12px}}
+
+/* Desktop-only, high-contrast typography. Leave all e-ink SVG styling intact. */
+body{font-family:"Microsoft YaHei UI","Microsoft YaHei","Segoe UI",sans-serif;font-size:16px;font-weight:600;color:#000;--text:#000;--muted:#000}
+:is(main,.sidebar,.toast) :not(.kindle-screen,.kindle-screen *,.kindle-device,.kindle-chin){color:#000!important}
+.sidebar,.toast{color:#000}.sidebar{background:#e7edde;border-right:1px solid #c7d0be}
+.brand-icon,.nav.active{background:#c9dcb6}.nav:hover{background:#d5e2c6}.sidebar-note{background:#f4f7ee;border-color:#c7d0be}
+.primary{background:#d4e6bc;color:#000;border:1px solid #a3b98e}.primary:hover{background:#bed5a0}
+.secondary,.sensor-banner .button{background:#fff;color:#000}.toast.error{background:#f7ddd1;color:#000}
+button,input,select,textarea{font:inherit}input,select,textarea{font-size:16px;font-weight:600}
+.nav,.button,.button.small,.sensor-banner .button,.heading-actions .button{font-size:15px;font-weight:700}
+h1{font-size:30px}.section-title h2{font-size:18px}.section-title>span,.page-heading p{font-size:15px}
+.workspace,.breadcrumb,.live-badge,.sidebar-note strong,.sidebar-note>span,.device-status,.data-folder{font-size:14px}
+.eyebrow,.tiny-label,.version{font-size:12px}
+.day-date,.day-greeting,.weather-location,.weather-description{font-size:15px}.weather-source{font-size:13px}
+.tile-label{font-size:16px;font-weight:700}.tile-footer{font-size:14px}.tile-unit{font-size:16px}
+.sensor-banner strong{font-size:16px}.sensor-banner p{font-size:14px}.hardware-line{font-size:15px;font-weight:700;flex-wrap:wrap;gap:10px 22px;line-height:1.8}
+.preview-caption,.preview-footnote,.sync-card p{font-size:14px}.sync-card strong{font-size:16px}
+.editor-card>label,.widget-inspector>label,.weather-details label,.weather-details,.list-heading,.edit-mode .list-heading{font-size:15px;font-weight:600}
+.help,.list-heading>span,.edit-mode .list-heading>span,.widget-chip,.edit-mode .widget-chip,.log{font-size:14px;font-weight:600}
+.editor-card,.widget-inspector{line-height:1.7}.metric-tile{padding:16px}.sensor-banner{flex-wrap:wrap}
+@media(max-width:1250px){.content-grid{grid-template-columns:minmax(365px,1fr) 330px}.content-grid.edit-mode{grid-template-columns:350px minmax(0,1fr)}.heading-actions .button{font-size:14px}.weather-hero{min-width:155px}.day-hero{flex-wrap:wrap}.clock{font-size:47px}}
+.preview-panel>.section-title{flex-wrap:wrap}
+.preview-zoom-controls{display:flex;align-items:center;gap:5px}
+.preview-zoom-controls .button{color:#000;font-size:12px;padding:7px 9px}
+#preview-zoom-value{min-width:42px;text-align:center;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
+.preview-panel .preview-surface,.edit-mode .preview-panel .preview-surface{display:block;padding:0;height:clamp(360px,65vh,760px);overflow:auto;overscroll-behavior:contain;outline-offset:3px;scrollbar-gutter:stable}
+.preview-surface:focus-visible{outline:2px solid #708d58}
+.preview-panel .kindle-device,.edit-mode .preview-panel .kindle-device{width:max-content;max-width:none;flex-shrink:0}
+.preview-panel.landscape .kindle-screen{flex:none}
+.preview-zoom-help{margin:10px 0 0;font-size:12px;color:#4a5542;line-height:1.6}
+.preview-stage{display:grid;place-items:center;width:max-content;height:max-content;min-width:100%;min-height:100%;padding:24px}

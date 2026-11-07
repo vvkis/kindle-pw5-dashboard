@@ -107,10 +107,57 @@ test('landscape rendering is complete, grayscale, and transport rotates correctl
    const actual=[[0,0],[1235,0],[0,1647],[1235,1647]].map(([x,y])=>native.data[(y*1236+x)*4]);assert.deepEqual(actual,expected);
   }
   let received=false;const transport=new Transport(async(file,args,options)=>{
+   assert.ok(args.some(arg=>arg==='root@kindle.local'||arg.startsWith('root@kindle.local:')));
    if(file.endsWith('scp.exe')){const local=args.find(arg=>arg.startsWith('./'));const sent=PNG.sync.read(await fs.readFile(path.join(options.cwd,local)));assert.equal(sent.width,1236);assert.equal(sent.height,1648);received=true;}
    return{stdout:''};
   });
-  await transport.push(config,file);assert.ok(received);
+  await transport.push({...config,connectionMode:'wifi',wifiHost:'kindle.local'},file);assert.ok(received);
   assert.ok(!(await fs.readdir(dir)).some(name=>name.startsWith('.kindle-')),'temporary upload snapshot must be removed');
  }finally{await fs.rm(dir,{recursive:true,force:true});}
+});
+
+
+test('minute changes override long intervals; busy pushes catch up and failures back off',()=>{
+ const {SyncSchedule}=require('../desktop/sync.cjs'),schedule=new SyncSchedule();
+ const start=new Date('2026-11-07T10:00:59.000Z').getTime();
+ assert.equal(schedule.due(start,start+3600000),true);
+ schedule.success(start);
+ assert.equal(schedule.due(start+500,start+3600000),false);
+ assert.equal(schedule.due(start+1000,start+3600000),true);
+ // A completed slow upload of the previous minute must still trigger catch-up.
+ schedule.success(start);
+ assert.equal(schedule.due(start+7000,start+3600000),true);
+ schedule.failure(start+7000);
+ assert.equal(schedule.due(start+8000,start+3600000),false);
+ assert.equal(schedule.due(start+12000,start+3600000),true);
+ schedule.success(start+12000);
+ assert.equal(schedule.due(start+13000,start+13000),true);
+ schedule.reset();assert.equal(schedule.due(start+13000,Infinity),true);
+});
+
+test('Wi-Fi selects its saved endpoint and uses the same strict SSH checks',async()=>{
+ const config=M.sanitize({...M.defaults(),connectionMode:'wifi',wifiHost:'192.168.1.123',pushInterval:7});
+ assert.equal(argsFor(config).target,'root@192.168.1.123');
+ assert.equal(argsFor({...config,connectionMode:'usb'}).target,'root@192.168.15.244');
+ assert.equal(argsFor(config).args.includes('StrictHostKeyChecking=yes'),true);
+ assert.throws(()=>argsFor({...config,wifiHost:''}),/Wi-Fi/);
+ assert.throws(()=>M.sanitize({...config,wifiHost:'host;cmd'}));
+ assert.throws(()=>M.sanitize({...config,connectionMode:'other'}));
+ assert.throws(()=>M.sanitize({...config,pushInterval:0}));
+ const calls=[],transport=new Transport(async(file,args)=>{calls.push(args);return{stdout:''};});
+ await transport.test(config);assert.ok(calls[0].includes('root@192.168.1.123'));
+});
+
+test('independent multiline notes and font weights persist through layout edits',()=>{
+ const config=M.defaults();config.note='底部留言';
+ config.widgets.find(w=>w.type==='note').content='第一行\n<script>第二行';
+ const saved=M.sanitize(JSON.parse(JSON.stringify(config)));
+ const moved=W.move(saved.widgets,'note',2,1);
+ assert.equal(moved.find(w=>w.type==='note').content,'第一行\n<script>第二行');
+ const svg=M.dashboardSvg(saved,{at:'2026-11-07T10:00:00Z',values:{}},[]);
+ assert.ok(svg.includes('第一行'));assert.ok(!svg.includes('<script>'));assert.ok(svg.includes('font-weight="700"'));
+ assert.equal(M.sanitize({...saved,fontWeight:400}).fontWeight,400);
+ saved.widgets.find(w=>w.type==='note').content='';
+ const empty=M.dashboardSvg(saved,{values:{}},[]);
+ assert.equal(empty.split('底部留言').length-1,1,'empty note must not inherit footer');
 });

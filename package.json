@@ -1,16 +1,17 @@
 {
   "name": "kindle-monitor",
-  "version": "0.2.2",
+  "version": "0.3.1",
   "private": true,
   "packageManager": "pnpm@10.20.0",
-  "description": "Editable PC hardware monitor for Kindle PW5 over USBNetwork",
+  "description": "Editable PC hardware monitor for Kindle PW5 over USBNetwork or Wi-Fi",
   "author": "vvkis",
   "main": "desktop/main.cjs",
   "scripts": {
     "start": "node scripts/run-desktop.cjs start",
-    "test": "node --test tests/desktop.test.cjs",
+    "test": "node --test tests/desktop.test.cjs tests/sensor-start.test.cjs",
     "smoke": "node scripts/run-desktop.cjs smoke",
     "build": "node scripts/run-desktop.cjs build",
+    "release": "node scripts/run-desktop.cjs release && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-release.ps1",
     "prepare:assets": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-assets.ps1",
     "benchmark": "node scripts/run-desktop.cjs benchmark",
     "benchmark:memory": "node scripts/run-desktop.cjs memory"
@@ -36,15 +37,21 @@
     },
     "files": [
       "desktop/**/*",
+      "!desktop/**/*.cs",
+      "!desktop/**/*.ps1",
+      "!desktop/icon.ico",
+      "!desktop/icon.svg",
       "package.json"
     ],
+    "electronLanguages": ["en-US", "zh-CN"],
     "extraResources": [
       {
         "from": "vendor/lhm",
         "to": "lhm",
         "filter": [
-          "**/*.dll",
-          "**/*.config",
+          "*.dll",
+          "!Aga.Controls.dll",
+          "!OxyPlot*.dll",
           "LICENSE*",
           "THIRD-PARTY*",
           "SOURCE.txt"
@@ -64,7 +71,10 @@
         "to": "sensors",
         "filter": [
           "*.exe",
-          "*.config"
+          "*.config",
+          "*.ps1",
+          "LICENSE*",
+          "SOURCE.txt"
         ]
       }
     ],
