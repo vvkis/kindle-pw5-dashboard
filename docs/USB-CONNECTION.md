@@ -31,6 +31,7 @@ USB\VID_0525&PID_A4A2
 
 - [作者原帖与安装说明](https://www.mobileread.com/forums/showthread.php?p=3283986)
 - [原帖附件下载](https://www.mobileread.com/forums/attachment.php?attachmentid=147204&d=1458474020)
+- [本项目 Release 附件](https://github.com/vvkis/kindle-pw5-dashboard/releases)：`kindle_rndis.inf_amd64-v1.0.0.1.zip`，旁边提供同名 `.sha256` 校验文件。使用前仍需阅读下方证书信任说明；这是第三方作者的原始包，不是本项目自研驱动或微软 WHQL 包。
 
 这份包提供硬件 ID 匹配信息，引用 Windows 自带 `netrndis.inf`，没有另带自编译 SYS。本机安装记录确认设备名称为 `Kindle USB RNDIS Device (USBNetwork enabled)`、服务为 `usbrndis6`、问题代码为 0；随后完成了 USB SSH 推图验证。原帖发布于 2016 年，不能据此保证适用所有 Windows 版本和安全策略。
 
@@ -39,6 +40,8 @@ USB\VID_0525&PID_A4A2
 ### 包完整性与证书
 
 从作者来源下载并解压。项目核对过的文件 SHA-256 如下；若不一致，应重新核对来源，不要继续按此记录安装。
+
+Release 中的驱动 ZIP 从作者附件重新下载，与本机此前验证过的原始 ZIP 逐字节哈希一致，未重新打包。ZIP SHA-256：`50b580da858651cd6dac794ba158a6aea81bc33e9634f91f9aac1599d12370ed`。归档只含作者原始的 5 个 CMD、INF、CAT 和公开 CER，不含本机安装脚本、日志、用户名、配置、设备实例记录或私钥。1–4 号 CMD 是作者的制证/签名工具脚本，提到 PVK/PFX 文件名，但归档中没有这些私钥文件，普通安装不要执行它们。
 
 | 文件 | SHA-256 |
 | --- | --- |
@@ -134,7 +137,7 @@ ssh -b 192.168.15.201 -i "$env:USERPROFILE\.ssh\id_rsa" -o BatchMode=yes root@19
 
 用完先关闭自动推送，退出应用或断开连接。拔掉 USB 后，电脑不再能推图；Kindle 可返回主页继续阅读。如果要在电脑上正常复制书籍，先在设备端关闭 USB 网络模式、恢复 USB 存储模式，再重新插线；USB 网络模式下看不到原来的磁盘不代表书籍丢失。日常不使用时可以关闭 USB SSH，需要看板时再开启，无需为普通阅读一直保持调试连接。
 
-此指南不包含个人配置、密钥或设备备份，也不随应用重新分发第三方驱动包和信任证书。驱动来源与系统信任步骤应由安装者自行核对。
+驱动包作为独立 Release 附件提供，不放入应用 ZIP，也不自动安装或自动导入证书。此指南及附件不包含个人配置、私钥或设备备份。驱动来源与系统信任步骤应由安装者自行核对。
 
 ## 参考
 
