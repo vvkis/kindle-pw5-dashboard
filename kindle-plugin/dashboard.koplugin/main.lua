@@ -113,7 +113,10 @@ function DashboardWidget:init()
         Tap = { GestureRange:new{ ges = "tap", range = range } },
         Swipe = { GestureRange:new{ ges = "swipe", range = range } },
         MultiSwipe = { GestureRange:new{ ges = "multiswipe", range = range } },
+        Hold = { GestureRange:new{ ges = "hold", range = range } },
     }
+    -- Ignore the menu tap that opened us, otherwise we close immediately.
+    self.ignore_input_until = (os.time() or 0) + 2
     if Device:hasKeys() and Device.input and Device.input.group and Device.input.group.Back then
         self.key_events = {
             Close = { { Device.input.group.Back } },
@@ -228,7 +231,15 @@ function DashboardWidget:showImage(mtime, force_full)
     return true
 end
 
+function DashboardWidget:_inputAllowed()
+    local until_ts = self.ignore_input_until or 0
+    return (os.time() or 0) >= until_ts
+end
+
 function DashboardWidget:onTap()
+    if not self:_inputAllowed() then
+        return true
+    end
     self.plugin:close()
     return true
 end
@@ -239,6 +250,14 @@ end
 
 function DashboardWidget:onMultiSwipe()
     return self:onTap()
+end
+
+function DashboardWidget:onHold()
+    if not self:_inputAllowed() then
+        return true
+    end
+    self.plugin:showConnectionInfo(true)
+    return true
 end
 
 function DashboardWidget:onClose()
@@ -569,6 +588,8 @@ function Dashboard:_handleRequest(data, client)
         logger.warn("dashboard: failed to store png", err)
         return self:_respond(client, 500, '{"ok":false,"error":"store_failed"}')
     end
+    self.got_upload = true
+    self.pairing_until = 0
     if self.widget and not self.widget.closed then
         self.widget:showImage(self:_imageMtime(), false)
     end
@@ -669,6 +690,10 @@ function Dashboard:open()
     self.suspended = false
     self.block_rearm = false
     self.resume_pending = false
+    self.got_upload = false
+    -- Keep the pairing screen up long enough to read IP / token, even when a
+    -- leftover /mnt/us/dashboard.png from older eips/SSH pushes is on disk.
+    self.pairing_until = (os.time() or 0) + 20
     self:_ensureToken()
     self:_arm()
     self:_startServer()
@@ -677,6 +702,7 @@ function Dashboard:open()
         poll_seconds = self:pollSeconds(),
     }
     UIManager:show(self.widget, "full")
+    self:showConnectionInfo(false)
 end
 
 function Dashboard:close()
@@ -701,6 +727,14 @@ function Dashboard:close()
     self._closing = false
 end
 
+function Dashboard:_mayShowDiskImage()
+    if self.got_upload then
+        return true
+    end
+    local until_ts = self.pairing_until or 0
+    return (os.time() or 0) >= until_ts
+end
+
 function Dashboard:onTick(widget)
     if widget.closed then
         return
@@ -715,7 +749,7 @@ function Dashboard:onTick(widget)
         self:_startServer()
         widget:showPlaceholder()
         local mtime = self:_imageMtime()
-        if mtime then
+        if mtime and self:_mayShowDiskImage() then
             widget:showImage(mtime, true)
         end
         self:_touchLease()
@@ -723,7 +757,7 @@ function Dashboard:onTick(widget)
     end
     self:_touchLease()
     local mtime = self:_imageMtime()
-    if mtime then
+    if mtime and self:_mayShowDiskImage() then
         if mtime ~= widget.last_mtime or widget.mode ~= "image" then
             widget:showImage(mtime, false)
         end
@@ -781,6 +815,22 @@ end
 
 function Dashboard:onCloseWidget()
     self:close()
+end
+
+function Dashboard:showConnectionInfo(manual)
+    local info = self:statusLines()
+    local text = table.concat({
+        _("看板接收"),
+        info.address,
+        _("口令"),
+        info.token,
+        info.note,
+        manual and _("长按可再次查看") or _("点按退出 · 长按查看连接信息"),
+    }, "\n")
+    UIManager:show(InfoMessage:new{
+        text = text,
+        timeout = manual and 12 or 15,
+    })
 end
 
 function Dashboard:showSettings()
