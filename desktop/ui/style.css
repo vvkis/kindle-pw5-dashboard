@@ -73,6 +73,14 @@ main{height:100vh;display:flex;flex-direction:column;min-height:0;overflow:hidde
 .content-grid{flex:1;min-height:0;overflow:hidden;align-items:stretch}
 .left-column,.preview-panel{min-height:0;overflow:auto;overscroll-behavior:contain}
 .left-column{padding-bottom:16px}
+/* Orientation frame: do not let the portrait aspect-ratio or edit-mode max-width squash a 1648×1236 board. */
+.preview-panel .kindle-device,
+.edit-mode .preview-panel .kindle-device,
+.edit-mode .preview-panel.landscape .kindle-device{max-width:none;width:max-content;height:auto}
+.preview-panel .kindle-screen{aspect-ratio:1236/1648;flex:0 0 auto;min-width:auto;overflow:hidden}
+.preview-panel.landscape .kindle-screen{aspect-ratio:1648/1236;flex:0 0 auto;min-width:auto}
+.preview-stage{justify-items:safe center;align-items:safe center}
+.preview-panel.landscape .preview-surface{height:auto;min-height:220px;max-height:min(72vh,640px)}
 .connection-card{padding:14px 16px}
 .connection-card>label,.connection-card #http-fields>label,.connection-card #ssh-fields>label:not(.check-label){margin-bottom:8px}
 .connection-card label input,.connection-card label select{margin-top:4px;padding:8px 10px}

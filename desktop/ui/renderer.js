@@ -93,7 +93,7 @@ for(const id of ['title','note'])$(id).addEventListener('input',()=>{draft[id]=$
 for(const id of ['host','wifi-host','port','identity-file','interval','cpu-sensor','http-host','http-port','http-token'])$(id).addEventListener('input',()=>{editing=true;});
 $('eips-refresh').addEventListener('change',()=>{editing=true;});
 async function saveAll(){
- const clean={...draft,title:$('title').value,note:$('note').value,connectionMode:$('connection-mode').value,wifiHost:$('wifi-host').value.trim(),httpHost:$('http-host').value.trim(),httpPort:Number($('http-port').value),httpToken:$('http-token').value.trim(),eipsRefresh:$('eips-refresh').checked,fontWeight:Number($('font-weight').value),host:$('host').value.trim(),port:Number($('port').value),identityFile:$('identity-file').value.trim(),pushInterval:Number($('interval').value),cpuSensor:$('cpu-sensor').value,weather:{name:$('weather-name').value,latitude:Number($('latitude').value),longitude:Number($('longitude').value),enabled:$('show-weather').checked}};
+ const clean={...draft,title:$('title').value,note:$('note').value,orientation:$('orientation').value,landscapeTop:$('landscape-top').value,connectionMode:$('connection-mode').value,wifiHost:$('wifi-host').value.trim(),httpHost:$('http-host').value.trim(),httpPort:Number($('http-port').value),httpToken:$('http-token').value.trim(),eipsRefresh:$('eips-refresh').checked,fontWeight:Number($('font-weight').value),host:$('host').value.trim(),port:Number($('port').value),identityFile:$('identity-file').value.trim(),pushInterval:Number($('interval').value),cpuSensor:$('cpu-sensor').value,weather:{name:$('weather-name').value,latitude:Number($('latitude').value),longitude:Number($('longitude').value),enabled:$('show-weather').checked}};
  draft=await call('save',clean);editing=false;toast('设置已保存');updatePreview();
 }
 $('save-editor').onclick=()=>action($('save-editor'),saveAll);$('save-connection').onclick=()=>action($('save-connection'),saveAll);
@@ -123,7 +123,7 @@ $('orientation').onchange=()=>{
  draft.orientation=next;draft.widgets=structuredClone(draft.layouts[next]);
  if(!draft.widgets.some(widget=>widget.id===selected))selected=draft.widgets[0]?.id;
  $('landscape-placement').classList.toggle('hidden',next!=='landscape');
- editing=true;renderEditor();updatePreview();
+ previewFit=true;editing=true;renderEditor();updatePreview();$('preview-viewport').scrollTo(0,0);
 };
 $('landscape-top').onchange=()=>{draft.landscapeTop=$('landscape-top').value;editing=true;updatePreview();};
 
@@ -146,10 +146,17 @@ function applyPreviewZoom(){
  if(!draft)return;
  const page=W.screen(draft.orientation),viewport=$('preview-viewport');
  const landscape=draft.orientation==='landscape';
- if(previewFit)previewZoom=Math.max(.1,Math.min(2,(viewport.clientWidth-48-(landscape?50:24))/page.width,(viewport.clientHeight-48-(landscape?26:50))/page.height));
- const preview=$('kindle-preview');preview.style.width=page.width*previewZoom+'px';preview.style.height=page.height*previewZoom+'px';
+ const availW=Math.max(120,viewport.clientWidth-32-(landscape?40:0));
+ const availH=Math.max(120,viewport.clientHeight-32-(landscape?0:36));
+ if(previewFit)previewZoom=Math.max(.05,Math.min(2,availW/page.width,availH/page.height));
+ const preview=$('kindle-preview');
+ const width=Math.round(page.width*previewZoom),height=Math.round(page.height*previewZoom);
+ preview.style.aspectRatio=page.width+' / '+page.height;
+ preview.style.width=width+'px';preview.style.height=height+'px';
+ preview.style.minWidth=width+'px';preview.style.minHeight=height+'px';
+ preview.style.maxWidth='none';preview.style.flex='0 0 auto';preview.style.alignSelf='flex-start';
  $('preview-zoom-value').textContent=Math.round(previewZoom*100)+'%';
- $('preview-zoom-out').disabled=previewZoom<=.1;$('preview-zoom-in').disabled=previewZoom>=2;
+ $('preview-zoom-out').disabled=previewZoom<=.05;$('preview-zoom-in').disabled=previewZoom>=2;
 }
 function setPreviewZoom(zoom,point){
  if(!draft||dragging)return;
