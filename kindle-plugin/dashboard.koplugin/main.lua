@@ -45,7 +45,7 @@ local lfs = require("libs/libkoreader-lfs")
 local WEEKDAYS = { "星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六" }
 local FULL_REFRESH_EVERY = 10
 -- Kindle PW5 paints close to the bezel. Keep content at least this far from every edge.
-local SAFE_MARGIN = 48
+local SAFE_MARGIN = 50
 
 local function commandOk(cmd)
     local result = os.execute(cmd)

@@ -54,7 +54,7 @@ test('plugin source stays away from screensaver, book settings, and .moon', () =
   assert.doesNotMatch(source, /sorting_hint = "tools"/);
   assert.doesNotMatch(source, /sorting_hint = "more_tools"/);
   assert.doesNotMatch(source, /menu_items\.dashboard_connection/);
-  assert.match(source, /SAFE_MARGIN = 48/);
+  assert.match(source, /SAFE_MARGIN = 50/);
   assert.match(source, /dashboard_open/);
   assert.match(source, /OpenDashboard/);
   assert.match(source, /preventStandby/);
