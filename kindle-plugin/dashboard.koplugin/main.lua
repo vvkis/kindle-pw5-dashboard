@@ -23,9 +23,8 @@ local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
-local HorizontalGroup = require("ui/widget/horizontalgroup")
-local HorizontalSpan = require("ui/widget/horizontalspan")
 local ImageWidget = require("ui/widget/imagewidget")
+local TextBoxWidget = require("ui/widget/textboxwidget")
 local InfoMessage = require("ui/widget/infomessage")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local InputDialog = require("ui/widget/inputdialog")
@@ -45,6 +44,8 @@ local lfs = require("libs/libkoreader-lfs")
 
 local WEEKDAYS = { "星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六" }
 local FULL_REFRESH_EVERY = 10
+-- Kindle PW5 paints close to the bezel. Keep content at least this far from every edge.
+local SAFE_MARGIN = 48
 
 local function commandOk(cmd)
     local result = os.execute(cmd)
@@ -155,51 +156,50 @@ function DashboardWidget:_replace(child, refresh)
     UIManager:setDirty(self, refresh or "partial")
 end
 
-function DashboardWidget:_textLine(text, face, color)
-    -- No max_width: KOReader ellipsizes when that is set, which hid the pairing code.
-    return TextWidget:new{
+function DashboardWidget:_syncScreen()
+    self.width = Screen:getWidth()
+    self.height = Screen:getHeight()
+    self.dimen = Geom:new{ x = 0, y = 0, w = self.width, h = self.height }
+end
+
+function DashboardWidget:_safeMargin()
+    local margin = Screen:scaleBySize(28)
+    if margin < SAFE_MARGIN then
+        margin = SAFE_MARGIN
+    end
+    if margin > 64 then
+        margin = 64
+    end
+    return margin
+end
+
+function DashboardWidget:_wrapped(text, face, color, width)
+    return TextBoxWidget:new{
         text = text,
         face = face,
+        width = width,
         fgcolor = color or Blitbuffer.COLOR_BLACK,
+        alignment = "center",
+        alignment_strict = true,
+        height_overflow_show_ellipsis = false,
     }
 end
 
-function DashboardWidget:_tokenRow(light_on_dark)
-    local color = light_on_dark and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK
-    local token_face = Font:getFace("cfont", Screen:scaleBySize(light_on_dark and 34 or 48))
-    local button_face = Font:getFace("cfont", Screen:scaleBySize(light_on_dark and 18 or 22))
-    local token = self:_textLine(self.plugin:token(), token_face, color)
-    local label = self:_textLine("重新生成", button_face, color)
-    local button = FrameContainer:new{
-        bordersize = Screen:scaleBySize(2),
-        color = color,
-        padding = Screen:scaleBySize(8),
-        margin = 0,
-        background = light_on_dark and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE,
-        label,
-    }
-    local row = HorizontalGroup:new{
-        align = "center",
-        token,
-        HorizontalSpan:new{ width = Screen:scaleBySize(18) },
-        button,
-    }
-    return row, button
-end
-
-function DashboardWidget:_rememberRegenerate(origin_x, origin_y, group, row_index, row, button)
-    group:getSize()
-    local row_size = row:getSize()
-    local group_width = group:getSize().w
-    local button_size = button:getSize()
-    local row_x = origin_x + math.floor((group_width - row_size.w) / 2)
-    local row_y = origin_y + (group._offsets[row_index] and group._offsets[row_index].y or 0)
-    self.regenerate_hit = {
-        x = row_x + row_size.w - button_size.w,
-        y = row_y + math.floor((row_size.h - button_size.h) / 2),
-        w = button_size.w,
-        h = button_size.h,
-    }
+function DashboardWidget:_fittedToken(text, color, max_width, start_size)
+    local size = start_size
+    local widget
+    while size >= 22 do
+        local face = Font:getFace("cfont", size)
+        widget = TextWidget:new{ text = text, face = face, fgcolor = color }
+        if widget:getSize().w <= max_width then
+            return widget
+        end
+        if widget.free then
+            widget:free()
+        end
+        size = size - 2
+    end
+    return widget
 end
 
 function DashboardWidget:_column(items)
@@ -210,100 +210,114 @@ function DashboardWidget:_column(items)
     return VerticalGroup:new(spec)
 end
 
-function DashboardWidget:showPlaceholder()
-    local parts = clockParts()
+function DashboardWidget:_pairingColumn(light_on_dark, content_w)
     local info = self.plugin:statusLines()
+    local color = light_on_dark and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK
+    local face = Font:getFace("cfont", Screen:scaleBySize(light_on_dark and 22 or 26))
+    local face_small = Font:getFace("cfont", Screen:scaleBySize(light_on_dark and 18 or 20))
+    local token = self:_fittedToken(info.token, color, content_w, Screen:scaleBySize(light_on_dark and 36 or 48))
+    local label = TextWidget:new{ text = "重新生成", face = face_small, fgcolor = color }
+    local button = FrameContainer:new{
+        bordersize = Screen:scaleBySize(2),
+        color = color,
+        padding = Screen:scaleBySize(8),
+        margin = 0,
+        background = light_on_dark and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE,
+        label,
+    }
+    local hint = light_on_dark and (self.plugin.server_error and "服务未启动\n点此隐藏" or "点此隐藏") or nil
+    local items = {
+        self:_wrapped(info.address, face, color, content_w),
+        VerticalSpan:new{ width = Screen:scaleBySize(8) },
+        self:_wrapped("口令", face_small, color, content_w),
+        VerticalSpan:new{ width = Screen:scaleBySize(4) },
+        token,
+        VerticalSpan:new{ width = Screen:scaleBySize(10) },
+    }
+    local button_index = #items + 1
+    items[button_index] = button
+    if not light_on_dark then
+        items[#items + 1] = VerticalSpan:new{ width = Screen:scaleBySize(14) }
+        items[#items + 1] = self:_wrapped(info.note, face_small, color, content_w)
+        items[#items + 1] = VerticalSpan:new{ width = Screen:scaleBySize(6) }
+        items[#items + 1] = self:_wrapped("点按空白处退出", face_small, color, content_w)
+    elseif hint then
+        items[#items + 1] = VerticalSpan:new{ width = Screen:scaleBySize(8) }
+        items[#items + 1] = self:_wrapped(hint, face_small, color, content_w)
+    end
+    return self:_column(items), button, button_index, info
+end
+
+function DashboardWidget:_placeButton(origin_x, origin_y, content_w, group, button_index, button)
+    group:getSize()
+    local button_size = button:getSize()
+    local row_y = origin_y
+    if group._offsets and group._offsets[button_index] then
+        row_y = origin_y + group._offsets[button_index].y
+    end
+    self.regenerate_hit = {
+        x = origin_x + math.floor((content_w - button_size.w) / 2),
+        y = row_y,
+        w = math.min(button_size.w, content_w),
+        h = button_size.h,
+    }
+end
+
+function DashboardWidget:showPlaceholder()
+    self:_syncScreen()
+    local parts = clockParts()
+    local margin = self:_safeMargin()
+    local content_w = self.width - margin * 2
+    local content_h = self.height - margin * 2
     self.mode = "placeholder"
     self.minute = parts.minute
-    self.address = info.address
+    self.address = self.plugin:statusLines().address
     self.last_mtime = nil
     self.overlay_top = nil
-    local face_clock = Font:getFace("cfont", Screen:scaleBySize(64))
-    local face = Font:getFace("cfont", Screen:scaleBySize(24))
-    local face_address = Font:getFace("cfont", Screen:scaleBySize(28))
-    local face_small = Font:getFace("cfont", Screen:scaleBySize(20))
-    local token_row, regen_button = self:_tokenRow(false)
-    local items = {
-        self:_textLine(parts.clock, face_clock),
-        VerticalSpan:new{ width = Screen:scaleBySize(16) },
-        self:_textLine(parts.date, face),
+    self.overlay_bottom = nil
+    local face_clock = Font:getFace("cfont", Screen:scaleBySize(56))
+    local face = Font:getFace("cfont", Screen:scaleBySize(22))
+    local column, button, button_index = self:_pairingColumn(false, content_w)
+    local clock = self:_wrapped(parts.clock, face_clock, Blitbuffer.COLOR_BLACK, content_w)
+    local head = self:_column({
+        clock,
         VerticalSpan:new{ width = Screen:scaleBySize(12) },
-        self:_textLine(batteryText(), face),
-        VerticalSpan:new{ width = Screen:scaleBySize(28) },
-        self:_textLine("等待电脑推送…", face),
-        VerticalSpan:new{ width = Screen:scaleBySize(16) },
-        self:_textLine(info.address, face_address),
+        self:_wrapped(parts.date, face, Blitbuffer.COLOR_BLACK, content_w),
         VerticalSpan:new{ width = Screen:scaleBySize(8) },
-        self:_textLine("口令", face_small),
-        VerticalSpan:new{ width = Screen:scaleBySize(6) },
-    }
-    local row_index = #items + 1
-    items[row_index] = token_row
-    local tail = {
+        self:_wrapped(batteryText(), face, Blitbuffer.COLOR_BLACK, content_w),
+        VerticalSpan:new{ width = Screen:scaleBySize(20) },
+        self:_wrapped("等待电脑推送…", face, Blitbuffer.COLOR_BLACK, content_w),
         VerticalSpan:new{ width = Screen:scaleBySize(16) },
-        self:_textLine(info.note, face_small),
-        VerticalSpan:new{ width = Screen:scaleBySize(8) },
-        self:_textLine("点按画面其它位置或返回手势退出", face_small),
-    }
-    for i = 1, #tail do
-        items[#items + 1] = tail[i]
+        column,
+    })
+    local size = head:getSize()
+    local top = margin + math.max(0, math.floor((content_h - size.h) / 2))
+    -- clock block height plus the spans before the pairing column
+    head:getSize()
+    local column_y = top
+    if head._offsets and head._offsets[#head._offsets] then
+        column_y = top + head._offsets[#head._offsets].y
     end
-    local group = self:_column(items)
-    local size = group:getSize()
-    self:_rememberRegenerate(
-        math.floor((self.width - size.w) / 2),
-        math.floor((self.height - size.h) / 2),
-        group, row_index, token_row, regen_button)
+    self:_placeButton(margin, column_y, content_w, column, button_index, button)
     self:_replace(FrameContainer:new{
         width = self.width,
         height = self.height,
         background = Blitbuffer.COLOR_WHITE,
         bordersize = 0,
         padding = 0,
+        padding_left = margin,
+        padding_right = margin,
         margin = 0,
-        CenterContainer:new{
-            dimen = Geom:new{ w = self.width, h = self.height },
-            group,
+        VerticalGroup:new{
+            align = "center",
+            VerticalSpan:new{ width = top },
+            head,
         },
     }, "full")
 end
 
-function DashboardWidget:_connectionBar()
-    local info = self.plugin:statusLines()
-    local face = Font:getFace("cfont", Screen:scaleBySize(22))
-    local face_small = Font:getFace("cfont", Screen:scaleBySize(18))
-    local bordersize = Screen:scaleBySize(2)
-    local padding = Screen:scaleBySize(10)
-    local token_row, regen_button = self:_tokenRow(true)
-    local hint = self.plugin.server_error and "服务未启动 · 点此隐藏" or "点此隐藏"
-    local items = {
-        self:_textLine(info.address, face, Blitbuffer.COLOR_WHITE),
-        VerticalSpan:new{ width = Screen:scaleBySize(6) },
-    }
-    local row_index = #items + 1
-    items[row_index] = token_row
-    items[#items + 1] = VerticalSpan:new{ width = Screen:scaleBySize(6) }
-    items[#items + 1] = self:_textLine(hint, face_small, Blitbuffer.COLOR_WHITE)
-    local group = self:_column(items)
-    self._bar_layout = {
-        group = group,
-        row_index = row_index,
-        row = token_row,
-        button = regen_button,
-        pad = bordersize + padding,
-    }
-    return FrameContainer:new{
-        width = self.width,
-        background = Blitbuffer.COLOR_BLACK,
-        bordersize = bordersize,
-        color = Blitbuffer.COLOR_WHITE,
-        padding = padding,
-        margin = 0,
-        group,
-    }
-end
-
 function DashboardWidget:showImage(mtime, force_full)
+    self:_syncScreen()
     local widget
     local ok = pcall(function()
         widget = ImageWidget:new{
@@ -347,17 +361,32 @@ function DashboardWidget:showImage(mtime, force_full)
         image_frame,
     }
     self.overlay_top = nil
+    self.overlay_bottom = nil
     self.overlay_address = nil
     self.regenerate_hit = nil
     if self.plugin:showConnectionInfo() then
-        local bar = self:_connectionBar()
-        local bar_height = bar:getSize().h
-        self.overlay_top = math.max(0, self.height - bar_height)
-        bar.overlap_offset = { 0, self.overlay_top }
-        local layout = self._bar_layout
-        if layout then
-            self:_rememberRegenerate(layout.pad, self.overlay_top + layout.pad, layout.group, layout.row_index, layout.row, layout.button)
+        local margin = self:_safeMargin()
+        local pad = Screen:scaleBySize(12)
+        local border = Screen:scaleBySize(2)
+        local inner_w = self.width - margin * 2 - (pad + border) * 2
+        if inner_w < 80 then
+            inner_w = 80
         end
+        local column, button, button_index = self:_pairingColumn(true, inner_w)
+        local bar = FrameContainer:new{
+            width = self.width - margin * 2,
+            background = Blitbuffer.COLOR_BLACK,
+            bordersize = border,
+            color = Blitbuffer.COLOR_WHITE,
+            padding = pad,
+            margin = 0,
+            column,
+        }
+        local bar_height = bar:getSize().h
+        self.overlay_top = math.max(margin, self.height - margin - bar_height)
+        self.overlay_bottom = self.overlay_top + bar_height
+        bar.overlap_offset = { margin, self.overlay_top }
+        self:_placeButton(margin + border + pad, self.overlay_top + border + pad, inner_w, column, button_index, button)
         stack[#stack + 1] = bar
         local info = self.plugin:statusLines()
         self.overlay_address = info.address .. info.token
@@ -372,11 +401,16 @@ function DashboardWidget:_inputAllowed()
 end
 
 function DashboardWidget:_tapOnOverlay(ges)
-    if self.mode ~= "image" or not self.overlay_top or not self.plugin:showConnectionInfo() then
+    if self.mode ~= "image" or not self.overlay_top or not self.overlay_bottom or not self.plugin:showConnectionInfo() then
         return false
     end
     local y = ges and ges.pos and ges.pos.y
-    return protocol.overlayTap(self.height, y, self.height - self.overlay_top, true)
+    local x = ges and ges.pos and ges.pos.x
+    if type(y) ~= "number" or type(x) ~= "number" then
+        return false
+    end
+    local margin = self:_safeMargin()
+    return y >= self.overlay_top and y < self.overlay_bottom and x >= margin and x < self.width - margin
 end
 
 function DashboardWidget:onTap(_, ges)
@@ -571,7 +605,7 @@ end
 
 function Dashboard:statusLines()
     local ip = self:_localIp()
-    local note = "屏幕保持点亮，耗电增加，请保持供电"
+    local note = "屏幕保持点亮，请接着充电"
     if self.server_error then
         note = "HTTP 未启动：" .. self.server_error
     elseif not ip then
