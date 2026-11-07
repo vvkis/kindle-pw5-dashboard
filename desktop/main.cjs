@@ -62,7 +62,7 @@ let pushing=false;
 async function push(){
   if(pushing)throw new Error('上一轮推送仍在进行');pushing=true;
   const renderedAt=Date.now();
-  try{const file=await renderPng(renderedAt);log(`正在通过 ${config.connectionMode==='wifi'?'Wi-Fi':'USBNetwork'} 推送…`);const result=await transport.push(config,file);sync.success(renderedAt);nextPush=Date.now()+config.pushInterval*1000;log(result.message);return result;}
+  try{const file=await renderPng(renderedAt);const via=config.connectionMode==='http'?'看板插件':config.connectionMode==='wifi'?'Wi-Fi':'USBNetwork';log(`正在通过 ${via} 推送…`);const result=await transport.push(config,file);sync.success(renderedAt);nextPush=Date.now()+config.pushInterval*1000;log(result.message);return result;}
   catch(e){sync.failure(Date.now());log(e.message,'error');throw e;}finally{pushing=false;broadcast();}
 }
 let sensorEnableTask=null;
@@ -80,7 +80,7 @@ function handle(channel,fn){ipcMain.handle(channel,async(event,...args)=>{
 async function openWindow(){
   if(window&&!window.isDestroyed()){window.restore();window.show();window.focus();return window;}
   backgroundMode=false;
-  const current=new BrowserWindow({title:'Kindle Monitor',icon:path.join(__dirname,'icon.png'),width:1480,height:1000,minWidth:1120,minHeight:780,backgroundColor:'#f4f4ef',show:!SMOKE,
+  const current=new BrowserWindow({title:'Kindle Monitor',icon:path.join(__dirname,'icon.png'),width:1480,height:900,minWidth:1080,minHeight:640,backgroundColor:'#f4f4ef',show:!SMOKE,
     autoHideMenuBar:true,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
   current.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   current.webContents.on('will-navigate',event=>event.preventDefault());

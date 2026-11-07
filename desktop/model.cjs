@@ -14,7 +14,8 @@
   };
   const defaults = () => ({
     title: '工作站监控', note: '保持专注，保持冷静。',
-    host: '192.168.15.244', wifiHost: '', connectionMode: 'usb', port: 22, identityFile: '', pushInterval: 60, fontWeight: 700,
+    host: '192.168.15.244', wifiHost: '', connectionMode: 'http', port: 22, identityFile: '', pushInterval: 60, fontWeight: 700,
+    httpHost: '', httpPort: 8686, httpToken: '', eipsRefresh: true,
     cpuSensor: '', layout: 'cards', showChart: true,
     weather: { name: '广州', latitude: 23.1291, longitude: 113.2644, enabled: true },
     widgets: Widgets.defaults(),
@@ -32,14 +33,24 @@
       if (!/^[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}$/.test(input.host)) throw new Error('设备地址应为 IPv4 或主机名');
       out.host = input.host;
     }
-    if(input.connectionMode!==undefined&&!['usb','wifi'].includes(input.connectionMode))throw new Error('无效的连接模式');
-    out.connectionMode=input.connectionMode||'usb';
+    if(input.connectionMode!==undefined&&!['usb','wifi','http'].includes(input.connectionMode))throw new Error('无效的连接模式');
+    out.connectionMode=input.connectionMode||'http';
     if(input.wifiHost!==undefined){
       if(input.wifiHost!==''&&!/^[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}$/.test(input.wifiHost))throw new Error('Wi-Fi 地址应为 IPv4 或主机名');
       out.wifiHost=input.wifiHost;
     }
+    if(input.httpHost!==undefined){
+      if(input.httpHost!==''&&!/^[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}$/.test(input.httpHost))throw new Error('看板地址应为 IPv4 或主机名');
+      out.httpHost=input.httpHost;
+    }
+    if(input.httpToken!==undefined){
+      const token=String(input.httpToken).replace(/[\x00-\x1f]/g,'').trim();
+      if(token.length>128||(token&&!/^[A-Za-z0-9._~-]+$/.test(token)))throw new Error('配对口令格式无效');
+      out.httpToken=token;
+    }
+    out.eipsRefresh=input.eipsRefresh!==false;
     if(input.fontWeight!==undefined){if(![400,700].includes(Number(input.fontWeight)))throw new Error('无效的字体粗细');out.fontWeight=Number(input.fontWeight);}
-    for (const [key,min,max] of [['port',1,65535],['pushInterval',1,3600]]) {
+    for (const [key,min,max] of [['port',1,65535],['pushInterval',1,3600],['httpPort',1,65535]]) {
       if (input[key] !== undefined) {
         if (!Number.isInteger(Number(input[key])) || Number(input[key]) < min || Number(input[key]) > max) throw new Error(`${key} 超出范围`);
         out[key] = Number(input[key]);
