@@ -80,15 +80,63 @@ function protocol.parseRequestHead(data)
     return { method = method, path = path, headers = headers }
 end
 
+-- Nil means the user has never chosen, so the pairing strip stays visible.
+function protocol.connectionInfoVisible(stored)
+    if stored == nil then
+        return true
+    end
+    return stored ~= false
+end
+
+-- Tap on the bottom strip toggles the overlay. Taps above it do not.
+function protocol.overlayTap(screen_height, y, bar_height, shown)
+    if not shown or type(y) ~= "number" or type(screen_height) ~= "number" or type(bar_height) ~= "number" then
+        return false
+    end
+    if bar_height < 1 or y < 0 or y > screen_height then
+        return false
+    end
+    return y >= screen_height - bar_height
+end
+
+-- Uppercase, no 0/O or 1/I, so the code can be read off the e-ink screen.
+protocol.TOKEN_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+protocol.TOKEN_LENGTH = 8
+
+function protocol.isPairingToken(token)
+    if type(token) ~= "string" or #token ~= protocol.TOKEN_LENGTH then
+        return false
+    end
+    for i = 1, #token do
+        if not protocol.TOKEN_ALPHABET:find(token:sub(i, i), 1, true) then
+            return false
+        end
+    end
+    return true
+end
+
 function protocol.randomToken(bytes)
-    if type(bytes) ~= "string" or #bytes ~= 16 then
+    local alphabet = protocol.TOKEN_ALPHABET
+    local size = #alphabet
+    if type(bytes) ~= "string" or #bytes < protocol.TOKEN_LENGTH then
         return nil
     end
-    local hex = {}
-    for i = 1, 16 do
-        hex[i] = string.format("%02x", bytes:byte(i))
+    local chars = {}
+    for i = 1, protocol.TOKEN_LENGTH do
+        local index = bytes:byte(i) % size + 1
+        chars[i] = alphabet:sub(index, index)
     end
-    return table.concat(hex)
+    return table.concat(chars)
+end
+
+function protocol.pointInBox(x, y, box)
+    if type(x) ~= "number" or type(y) ~= "number" or type(box) ~= "table" then
+        return false
+    end
+    if type(box.x) ~= "number" or type(box.y) ~= "number" or type(box.w) ~= "number" or type(box.h) ~= "number" then
+        return false
+    end
+    return x >= box.x and y >= box.y and x < box.x + box.w and y < box.y + box.h
 end
 
 -- If this file is not touched for LEASE_SECONDS, clear preventScreenSaver and exit.

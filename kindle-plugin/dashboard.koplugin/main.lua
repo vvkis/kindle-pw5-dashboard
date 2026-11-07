@@ -22,10 +22,13 @@ local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
+local HorizontalGroup = require("ui/widget/horizontalgroup")
+local HorizontalSpan = require("ui/widget/horizontalspan")
 local ImageWidget = require("ui/widget/imagewidget")
 local InfoMessage = require("ui/widget/infomessage")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local InputDialog = require("ui/widget/inputdialog")
+local OverlapGroup = require("ui/widget/overlapgroup")
 local PluginShare = require("pluginshare")
 local SpinWidget = require("ui/widget/spinwidget")
 local TextWidget = require("ui/widget/textwidget")
@@ -111,9 +114,9 @@ function DashboardWidget:init()
     local range = Geom:new{ x = 0, y = 0, w = self.width, h = self.height }
     self.ges_events = {
         Tap = { GestureRange:new{ ges = "tap", range = range } },
+        Hold = { GestureRange:new{ ges = "hold", range = range } },
         Swipe = { GestureRange:new{ ges = "swipe", range = range } },
         MultiSwipe = { GestureRange:new{ ges = "multiswipe", range = range } },
-        Hold = { GestureRange:new{ ges = "hold", range = range } },
     }
     -- Ignore the menu tap that opened us, otherwise we close immediately.
     self.ignore_input_until = (os.time() or 0) + 2
@@ -125,7 +128,10 @@ function DashboardWidget:init()
     self.tick_action = function()
         self:_tick()
     end
-    self:showPlaceholder()
+    local mtime = self.plugin:_imageMtime()
+    if not (mtime and self:showImage(mtime, true)) then
+        self:showPlaceholder()
+    end
     UIManager:scheduleIn(self.poll_seconds, self.tick_action)
 end
 
@@ -148,6 +154,61 @@ function DashboardWidget:_replace(child, refresh)
     UIManager:setDirty(self, refresh or "partial")
 end
 
+function DashboardWidget:_textLine(text, face, color)
+    -- No max_width: KOReader ellipsizes when that is set, which hid the pairing code.
+    return TextWidget:new{
+        text = text,
+        face = face,
+        fgcolor = color or Blitbuffer.COLOR_BLACK,
+    }
+end
+
+function DashboardWidget:_tokenRow(light_on_dark)
+    local color = light_on_dark and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK
+    local token_face = Font:getFace("cfont", Screen:scaleBySize(light_on_dark and 34 or 48))
+    local button_face = Font:getFace("cfont", Screen:scaleBySize(light_on_dark and 18 or 22))
+    local token = self:_textLine(self.plugin:token(), token_face, color)
+    local label = self:_textLine("重新生成", button_face, color)
+    local button = FrameContainer:new{
+        bordersize = Screen:scaleBySize(2),
+        color = color,
+        padding = Screen:scaleBySize(8),
+        margin = 0,
+        background = light_on_dark and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE,
+        label,
+    }
+    local row = HorizontalGroup:new{
+        align = "center",
+        token,
+        HorizontalSpan:new{ width = Screen:scaleBySize(18) },
+        button,
+    }
+    return row, button
+end
+
+function DashboardWidget:_rememberRegenerate(origin_x, origin_y, group, row_index, row, button)
+    group:getSize()
+    local row_size = row:getSize()
+    local group_width = group:getSize().w
+    local button_size = button:getSize()
+    local row_x = origin_x + math.floor((group_width - row_size.w) / 2)
+    local row_y = origin_y + (group._offsets[row_index] and group._offsets[row_index].y or 0)
+    self.regenerate_hit = {
+        x = row_x + row_size.w - button_size.w,
+        y = row_y + math.floor((row_size.h - button_size.h) / 2),
+        w = button_size.w,
+        h = button_size.h,
+    }
+end
+
+function DashboardWidget:_column(items)
+    local spec = { align = "center" }
+    for i, widget in ipairs(items) do
+        spec[i] = widget
+    end
+    return VerticalGroup:new(spec)
+end
+
 function DashboardWidget:showPlaceholder()
     local parts = clockParts()
     local info = self.plugin:statusLines()
@@ -155,12 +216,43 @@ function DashboardWidget:showPlaceholder()
     self.minute = parts.minute
     self.address = info.address
     self.last_mtime = nil
+    self.overlay_top = nil
     local face_clock = Font:getFace("cfont", Screen:scaleBySize(64))
     local face = Font:getFace("cfont", Screen:scaleBySize(24))
+    local face_address = Font:getFace("cfont", Screen:scaleBySize(28))
     local face_small = Font:getFace("cfont", Screen:scaleBySize(20))
-    local function line(text, face_obj)
-        return TextWidget:new{ text = text, face = face_obj, max_width = self.width - Screen:scaleBySize(48) }
+    local token_row, regen_button = self:_tokenRow(false)
+    local items = {
+        self:_textLine(parts.clock, face_clock),
+        VerticalSpan:new{ width = Screen:scaleBySize(16) },
+        self:_textLine(parts.date, face),
+        VerticalSpan:new{ width = Screen:scaleBySize(12) },
+        self:_textLine(batteryText(), face),
+        VerticalSpan:new{ width = Screen:scaleBySize(28) },
+        self:_textLine("等待电脑推送…", face),
+        VerticalSpan:new{ width = Screen:scaleBySize(16) },
+        self:_textLine(info.address, face_address),
+        VerticalSpan:new{ width = Screen:scaleBySize(8) },
+        self:_textLine("口令", face_small),
+        VerticalSpan:new{ width = Screen:scaleBySize(6) },
+    }
+    local row_index = #items + 1
+    items[row_index] = token_row
+    local tail = {
+        VerticalSpan:new{ width = Screen:scaleBySize(16) },
+        self:_textLine(info.note, face_small),
+        VerticalSpan:new{ width = Screen:scaleBySize(8) },
+        self:_textLine("点按画面其它位置或返回手势退出", face_small),
+    }
+    for i = 1, #tail do
+        items[#items + 1] = tail[i]
     end
+    local group = self:_column(items)
+    local size = group:getSize()
+    self:_rememberRegenerate(
+        math.floor((self.width - size.w) / 2),
+        math.floor((self.height - size.h) / 2),
+        group, row_index, token_row, regen_button)
     self:_replace(FrameContainer:new{
         width = self.width,
         height = self.height,
@@ -170,27 +262,44 @@ function DashboardWidget:showPlaceholder()
         margin = 0,
         CenterContainer:new{
             dimen = Geom:new{ w = self.width, h = self.height },
-            VerticalGroup:new{
-                align = "center",
-                line(parts.clock, face_clock),
-                VerticalSpan:new{ width = Screen:scaleBySize(16) },
-                line(parts.date, face),
-                VerticalSpan:new{ width = Screen:scaleBySize(12) },
-                line(batteryText(), face),
-                VerticalSpan:new{ width = Screen:scaleBySize(28) },
-                line("等待电脑推送…", face),
-                VerticalSpan:new{ width = Screen:scaleBySize(16) },
-                line(info.address, face_small),
-                VerticalSpan:new{ width = Screen:scaleBySize(8) },
-                line("口令", face_small),
-                line(info.token, face_small),
-                VerticalSpan:new{ width = Screen:scaleBySize(16) },
-                line(info.note, face_small),
-                VerticalSpan:new{ width = Screen:scaleBySize(8) },
-                line("点按或返回手势退出", face_small),
-            },
+            group,
         },
     }, "full")
+end
+
+function DashboardWidget:_connectionBar()
+    local info = self.plugin:statusLines()
+    local face = Font:getFace("cfont", Screen:scaleBySize(22))
+    local face_small = Font:getFace("cfont", Screen:scaleBySize(18))
+    local bordersize = Screen:scaleBySize(2)
+    local padding = Screen:scaleBySize(10)
+    local token_row, regen_button = self:_tokenRow(true)
+    local hint = self.plugin.server_error and "服务未启动 · 点此隐藏" or "点此隐藏"
+    local items = {
+        self:_textLine(info.address, face, Blitbuffer.COLOR_WHITE),
+        VerticalSpan:new{ width = Screen:scaleBySize(6) },
+    }
+    local row_index = #items + 1
+    items[row_index] = token_row
+    items[#items + 1] = VerticalSpan:new{ width = Screen:scaleBySize(6) }
+    items[#items + 1] = self:_textLine(hint, face_small, Blitbuffer.COLOR_WHITE)
+    local group = self:_column(items)
+    self._bar_layout = {
+        group = group,
+        row_index = row_index,
+        row = token_row,
+        button = regen_button,
+        pad = bordersize + padding,
+    }
+    return FrameContainer:new{
+        width = self.width,
+        background = Blitbuffer.COLOR_BLACK,
+        bordersize = bordersize,
+        color = Blitbuffer.COLOR_WHITE,
+        padding = padding,
+        margin = 0,
+        group,
+    }
 end
 
 function DashboardWidget:showImage(mtime, force_full)
@@ -212,11 +321,14 @@ function DashboardWidget:showImage(mtime, force_full)
         self:showPlaceholder()
         return false
     end
-    self.image_updates = self.image_updates + 1
-    local full = force_full or self.image_updates == 1 or self.image_updates % FULL_REFRESH_EVERY == 0
+    local changed = mtime ~= self.last_mtime or self.mode ~= "image"
+    if changed then
+        self.image_updates = self.image_updates + 1
+    end
+    local full = force_full or (changed and (self.image_updates == 1 or self.image_updates % FULL_REFRESH_EVERY == 0))
     self.mode = "image"
     self.last_mtime = mtime
-    self:_replace(FrameContainer:new{
+    local image_frame = FrameContainer:new{
         width = self.width,
         height = self.height,
         background = Blitbuffer.COLOR_WHITE,
@@ -227,7 +339,29 @@ function DashboardWidget:showImage(mtime, force_full)
             dimen = Geom:new{ w = self.width, h = self.height },
             widget,
         },
-    }, full and "full" or "partial")
+    }
+    local stack = {
+        allow_mirroring = false,
+        dimen = Geom:new{ w = self.width, h = self.height },
+        image_frame,
+    }
+    self.overlay_top = nil
+    self.overlay_address = nil
+    self.regenerate_hit = nil
+    if self.plugin:showConnectionInfo() then
+        local bar = self:_connectionBar()
+        local bar_height = bar:getSize().h
+        self.overlay_top = math.max(0, self.height - bar_height)
+        bar.overlap_offset = { 0, self.overlay_top }
+        local layout = self._bar_layout
+        if layout then
+            self:_rememberRegenerate(layout.pad, self.overlay_top + layout.pad, layout.group, layout.row_index, layout.row, layout.button)
+        end
+        stack[#stack + 1] = bar
+        local info = self.plugin:statusLines()
+        self.overlay_address = info.address .. info.token
+    end
+    self:_replace(OverlapGroup:new(stack), full and "full" or "partial")
     return true
 end
 
@@ -236,11 +370,39 @@ function DashboardWidget:_inputAllowed()
     return (os.time() or 0) >= until_ts
 end
 
-function DashboardWidget:onTap()
+function DashboardWidget:_tapOnOverlay(ges)
+    if self.mode ~= "image" or not self.overlay_top or not self.plugin:showConnectionInfo() then
+        return false
+    end
+    local y = ges and ges.pos and ges.pos.y
+    return protocol.overlayTap(self.height, y, self.height - self.overlay_top, true)
+end
+
+function DashboardWidget:onTap(_, ges)
     if not self:_inputAllowed() then
         return true
     end
+    local x = ges and ges.pos and ges.pos.x
+    local y = ges and ges.pos and ges.pos.y
+    if protocol.pointInBox(x, y, self.regenerate_hit) then
+        self.plugin:confirmRegenerate()
+        return true
+    end
+    if self:_tapOnOverlay(ges) then
+        self.plugin:toggleConnectionInfo()
+        return true
+    end
     self.plugin:close()
+    return true
+end
+
+function DashboardWidget:onHold()
+    if not self:_inputAllowed() then
+        return true
+    end
+    if self.mode == "image" and not self.plugin:showConnectionInfo() then
+        self.plugin:setShowConnectionInfo(true)
+    end
     return true
 end
 
@@ -250,14 +412,6 @@ end
 
 function DashboardWidget:onMultiSwipe()
     return self:onTap()
-end
-
-function DashboardWidget:onHold()
-    if not self:_inputAllowed() then
-        return true
-    end
-    self.plugin:showConnectionInfo(true)
-    return true
 end
 
 function DashboardWidget:onClose()
@@ -291,6 +445,33 @@ function Dashboard:addToMainMenu(menu_items)
             self:showSettings()
         end,
     }
+    menu_items.dashboard_connection = {
+        text = _("连接信息"),
+        sorting_hint = "more_tools",
+        callback = function()
+            self:setShowConnectionInfo(true)
+            if not self.widget then
+                self:open()
+            end
+        end,
+    }
+end
+
+function Dashboard:showConnectionInfo()
+    return protocol.connectionInfoVisible(G_reader_settings:readSetting("dashboard_show_connection_info"))
+end
+
+function Dashboard:setShowConnectionInfo(enabled)
+    G_reader_settings:saveSetting("dashboard_show_connection_info", enabled and true or false)
+    G_reader_settings:flush()
+    local widget = self.widget
+    if widget and not widget.closed and widget.mode == "image" and widget.last_mtime then
+        widget:showImage(widget.last_mtime, false)
+    end
+end
+
+function Dashboard:toggleConnectionInfo()
+    self:setShowConnectionInfo(not self:showConnectionInfo())
 end
 
 function Dashboard:port()
@@ -311,19 +492,20 @@ end
 
 function Dashboard:_ensureToken()
     local token = G_reader_settings:readSetting("dashboard_token")
-    if type(token) == "string" and token:match("^%x+$") and #token >= 16 then
+    -- Older builds stored a 32-character hex secret that did not fit on the screen.
+    if protocol.isPairingToken(token) then
         return token
     end
     local generated
     local random = io.open("/dev/urandom", "rb")
     if random then
-        generated = protocol.randomToken(random:read(16) or "")
+        generated = protocol.randomToken(random:read(protocol.TOKEN_LENGTH) or "")
         random:close()
     end
     if not generated then
         math.randomseed(os.time() % 2147483647)
         local bytes = {}
-        for i = 1, 16 do
+        for i = 1, protocol.TOKEN_LENGTH do
             bytes[i] = string.char(math.random(0, 255))
         end
         generated = protocol.randomToken(table.concat(bytes))
@@ -588,8 +770,6 @@ function Dashboard:_handleRequest(data, client)
         logger.warn("dashboard: failed to store png", err)
         return self:_respond(client, 500, '{"ok":false,"error":"store_failed"}')
     end
-    self.got_upload = true
-    self.pairing_until = 0
     if self.widget and not self.widget.closed then
         self.widget:showImage(self:_imageMtime(), false)
     end
@@ -690,10 +870,6 @@ function Dashboard:open()
     self.suspended = false
     self.block_rearm = false
     self.resume_pending = false
-    self.got_upload = false
-    -- Keep the pairing screen up long enough to read IP / token, even when a
-    -- leftover /mnt/us/dashboard.png from older eips/SSH pushes is on disk.
-    self.pairing_until = (os.time() or 0) + 20
     self:_ensureToken()
     self:_arm()
     self:_startServer()
@@ -702,7 +878,6 @@ function Dashboard:open()
         poll_seconds = self:pollSeconds(),
     }
     UIManager:show(self.widget, "full")
-    self:showConnectionInfo(false)
 end
 
 function Dashboard:close()
@@ -727,14 +902,6 @@ function Dashboard:close()
     self._closing = false
 end
 
-function Dashboard:_mayShowDiskImage()
-    if self.got_upload then
-        return true
-    end
-    local until_ts = self.pairing_until or 0
-    return (os.time() or 0) >= until_ts
-end
-
 function Dashboard:onTick(widget)
     if widget.closed then
         return
@@ -749,7 +916,7 @@ function Dashboard:onTick(widget)
         self:_startServer()
         widget:showPlaceholder()
         local mtime = self:_imageMtime()
-        if mtime and self:_mayShowDiskImage() then
+        if mtime then
             widget:showImage(mtime, true)
         end
         self:_touchLease()
@@ -757,8 +924,11 @@ function Dashboard:onTick(widget)
     end
     self:_touchLease()
     local mtime = self:_imageMtime()
-    if mtime and self:_mayShowDiskImage() then
-        if mtime ~= widget.last_mtime or widget.mode ~= "image" then
+    if mtime then
+        local info = self:statusLines()
+        local overlay_stale = widget.mode == "image" and self:showConnectionInfo()
+            and widget.overlay_address ~= (info.address .. info.token)
+        if mtime ~= widget.last_mtime or widget.mode ~= "image" or overlay_stale then
             widget:showImage(mtime, false)
         end
         return
@@ -817,22 +987,6 @@ function Dashboard:onCloseWidget()
     self:close()
 end
 
-function Dashboard:showConnectionInfo(manual)
-    local info = self:statusLines()
-    local text = table.concat({
-        _("看板接收"),
-        info.address,
-        _("口令"),
-        info.token,
-        info.note,
-        manual and _("长按可再次查看") or _("点按退出 · 长按查看连接信息"),
-    }, "\n")
-    UIManager:show(InfoMessage:new{
-        text = text,
-        timeout = manual and 12 or 15,
-    })
-end
-
 function Dashboard:showSettings()
     local dialog
     dialog = ButtonDialog:new{
@@ -851,6 +1005,16 @@ function Dashboard:showSettings()
                 callback = function()
                     UIManager:close(dialog)
                     self:editPoll()
+                end,
+            }},
+            {{
+                text = _("连接信息"),
+                callback = function()
+                    UIManager:close(dialog)
+                    self:setShowConnectionInfo(true)
+                    if not self.widget then
+                        self:open()
+                    end
                 end,
             }},
             {{
@@ -895,9 +1059,11 @@ function Dashboard:editPort()
                         if self.widget then
                             self:_stopServer()
                             self:_startServer()
-                            if self.widget.mode == "placeholder" then
-                                self.widget:showPlaceholder()
-                            end
+                        if self.widget.mode == "placeholder" then
+                            self.widget:showPlaceholder()
+                        elseif self.widget.last_mtime then
+                            self.widget:showImage(self.widget.last_mtime, false)
+                        end
                         end
                     else
                         UIManager:show(InfoMessage:new{ text = _("端口需在 1024 到 65535 之间"), timeout = 3 })
@@ -940,8 +1106,12 @@ function Dashboard:confirmRegenerate()
                 G_reader_settings:saveSetting("dashboard_token", nil)
             end
             self:_ensureToken()
-            if self.widget and self.widget.mode == "placeholder" then
-                self.widget:showPlaceholder()
+            if self.widget and not self.widget.closed then
+                if self.widget.mode == "image" and self.widget.last_mtime then
+                    self.widget:showImage(self.widget.last_mtime, false)
+                else
+                    self.widget:showPlaceholder()
+                end
             end
         end,
     })
