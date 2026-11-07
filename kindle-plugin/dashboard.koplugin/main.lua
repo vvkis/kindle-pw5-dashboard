@@ -436,6 +436,21 @@ function Dashboard:init()
     self:onDispatcherRegisterActions()
 end
 
+-- KOReader only appends sorting_hint orphans, so "tools" sits after 更多工具.
+-- Putting the id first in the main-tab order makes it the top entry of that tab.
+local function pinMainMenuEntry(order_module, entry_id)
+    local ok, order = pcall(require, order_module)
+    if not ok or type(order) ~= "table" or type(order.main) ~= "table" then
+        return
+    end
+    for _, id in ipairs(order.main) do
+        if id == entry_id then
+            return
+        end
+    end
+    table.insert(order.main, 1, entry_id)
+end
+
 function Dashboard:onDispatcherRegisterActions()
     -- Shows up in 手势管理器 so a swipe can open the dashboard. general=true
     -- keeps it available in both the file browser and the reader.
@@ -453,26 +468,18 @@ function Dashboard:onOpenDashboard()
 end
 
 function Dashboard:addToMainMenu(menu_items)
-    -- "tools" is a top-level tab (阅读计时、Calibre、统计). Orphan items are
-    -- appended there, so this stays out of the nested 更多工具 list.
+    pinMainMenuEntry("ui/elements/reader_menu_order", "dashboard")
+    pinMainMenuEntry("ui/elements/filemanager_menu_order", "dashboard")
+    -- "main" is the primary hamburger tab (history / exit), not 更多工具.
+    -- The order pin above places this first; sorting_hint is the fallback.
     menu_items.dashboard = {
         text = _("看板模式"),
-        sorting_hint = "tools",
+        sorting_hint = "main",
         callback = function()
             self:open()
         end,
         hold_callback = function()
             self:showSettings()
-        end,
-    }
-    menu_items.dashboard_connection = {
-        text = _("连接信息"),
-        sorting_hint = "tools",
-        callback = function()
-            self:setShowConnectionInfo(true)
-            if not self.widget then
-                self:open()
-            end
         end,
     }
 end

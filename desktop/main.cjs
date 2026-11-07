@@ -80,7 +80,7 @@ function handle(channel,fn){ipcMain.handle(channel,async(event,...args)=>{
 async function openWindow(){
   if(window&&!window.isDestroyed()){window.restore();window.show();window.focus();return window;}
   backgroundMode=false;
-  const current=new BrowserWindow({title:'Kindle Monitor',icon:path.join(__dirname,'icon.png'),width:1480,height:1000,minWidth:1120,minHeight:780,backgroundColor:'#f4f4ef',show:!SMOKE,
+  const current=new BrowserWindow({title:'Kindle Monitor',icon:path.join(__dirname,'icon.png'),width:1480,height:900,minWidth:1080,minHeight:640,backgroundColor:'#f4f4ef',show:!SMOKE,
     autoHideMenuBar:true,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
   current.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   current.webContents.on('will-navigate',event=>event.preventDefault());

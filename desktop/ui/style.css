@@ -64,6 +64,19 @@ h1{font-size:30px}.section-title h2{font-size:18px}.section-title>span,.page-hea
 .preview-panel.landscape .kindle-screen{flex:none}
 .preview-zoom-help{margin:10px 0 0;font-size:12px;color:#4a5542;line-height:1.6}
 .preview-stage{display:grid;place-items:center;width:max-content;height:max-content;min-width:100%;min-height:100%;padding:24px}
-#http-fields>label,#ssh-fields>label:not(.check-label){display:block;margin-bottom:18px;font-size:15px;font-weight:600;color:#4f6445}
-#http-fields .field-row,#ssh-fields>.field-row{margin-bottom:18px}
-#ssh-fields .check-label{margin:4px 0 12px}
+#http-fields>label,#ssh-fields>label:not(.check-label){display:block;margin-bottom:10px;font-size:15px;font-weight:600;color:#4f6445}
+#http-fields .field-row,#ssh-fields>.field-row{margin-bottom:10px}
+#ssh-fields .check-label{margin:2px 0 8px}
+html,body{height:100%;overflow:hidden}
+main{height:100vh;display:flex;flex-direction:column;min-height:0;overflow:hidden;box-sizing:border-box}
+.sidebar{height:100vh;overflow:auto}
+.content-grid{flex:1;min-height:0;overflow:hidden;align-items:stretch}
+.left-column,.preview-panel{min-height:0;overflow:auto;overscroll-behavior:contain}
+.left-column{padding-bottom:16px}
+.connection-card{padding:14px 16px}
+.connection-card>label,.connection-card #http-fields>label,.connection-card #ssh-fields>label:not(.check-label){margin-bottom:8px}
+.connection-card label input,.connection-card label select{margin-top:4px;padding:8px 10px}
+.connection-card .help{margin:0 0 8px;line-height:1.45;font-size:13px;font-weight:500}
+.connection-card .field-row{margin-top:0}
+#connection-panel .section-title{margin-bottom:8px}
+#connection-panel .activity{margin-top:12px}

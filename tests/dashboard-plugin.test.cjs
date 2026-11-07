@@ -48,8 +48,12 @@ test('plugin source stays away from screensaver, book settings, and .moon', () =
   assert.match(source, /dashboard_poll_interval/);
   assert.match(source, /dashboard_show_connection_info/);
   assert.match(source, /连接信息/);
-  assert.match(source, /sorting_hint = "tools"/);
-  assert.doesNotMatch(source, /more_tools/);
+  assert.match(source, /sorting_hint = "main"/);
+  assert.match(source, /reader_menu_order/);
+  assert.match(source, /filemanager_menu_order/);
+  assert.doesNotMatch(source, /sorting_hint = "tools"/);
+  assert.doesNotMatch(source, /sorting_hint = "more_tools"/);
+  assert.doesNotMatch(source, /menu_items\.dashboard_connection/);
   assert.match(source, /dashboard_open/);
   assert.match(source, /OpenDashboard/);
   assert.match(source, /preventStandby/);
