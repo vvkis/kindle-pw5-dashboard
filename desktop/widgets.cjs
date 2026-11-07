@@ -1,5 +1,30 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory();else root.DesktopWidgets=factory();})(typeof globalThis==='object'?globalThis:this,function(){
- const TYPES={calendar:'日历',clock:'时间与日期',weather:'天气',cpuTemp:'CPU 温度',gpuTemp:'GPU 温度',cpuLoad:'CPU 占用',gpuLoad:'显卡占用',memoryLoad:'内存占用',gpuMemoryLoad:'显存占用',memoryUsed:'已用内存',gpuPower:'显卡功耗',system:'系统概览',trend:'温度趋势',note:'文字便签'};
+ const TYPES={calendar:'日历',clock:'时间与日期',weather:'天气',cpuTemp:'CPU 温度',gpuTemp:'GPU 温度',cpuLoad:'CPU 占用',gpuLoad:'显卡占用',memoryLoad:'内存占用',gpuMemoryLoad:'显存占用',memoryUsed:'已用内存',gpuPower:'显卡功耗',system:'系统概览',trend:'温度趋势',note:'文字便签',image:'图片'};
+ const IMAGE_MAX_SIDE=768;
+ const IMAGE_VIEW=Object.freeze({fit:'contain',zoom:100,x:0,y:0});
+ const BAYER=[0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5];
+ function mapImage(data,width,mono=false){
+  for(let i=0;i<data.length;i+=4){
+   const luminance=Math.round(.2126*data[i]+.7152*data[i+1]+.0722*data[i+2]);
+   let value=luminance;
+   if(mono){
+    const pixel=i/4,x=pixel%width,y=Math.floor(pixel/width);
+    value=luminance>(BAYER[(y%4)*4+x%4]+.5)*16?255:0;
+   }
+   data[i]=data[i+1]=data[i+2]=value;
+  }
+ }
+ function imageData(value){
+  if(typeof value!=='string'||value.length>2_000_000||!/^data:image\/png;base64,iVBORw0KGgo[A-Za-z0-9+/]*={0,2}$/.test(value))throw new Error('组件图片无效或过大');
+  return value;
+ }
+ function imageSize(data){
+  const header=atob(data.slice('data:image/png;base64,'.length,'data:image/png;base64,'.length+32));
+  const width=header.charCodeAt(16)*2**24+header.charCodeAt(17)*2**16+header.charCodeAt(18)*256+header.charCodeAt(19);
+  const height=header.charCodeAt(20)*2**24+header.charCodeAt(21)*2**16+header.charCodeAt(22)*256+header.charCodeAt(23);
+  if(!(width>0&&height>0))throw new Error('组件图片尺寸无效');
+  return {width,height};
+ }
  const GRID={columns:4,rows:6,x:64,y:134,width:1108,height:1356,gap:20};
  function screen(orientation='portrait'){
   return orientation==='landscape'?{width:1648,height:1236,grid:{columns:6,rows:4,x:64,y:118,width:1520,height:972,gap:20}}:{width:1236,height:1648,grid:GRID};
@@ -37,6 +62,13 @@
    if(w.x<0||w.y<0||w.w<1||w.h<1||w.x+w.w>grid.columns||w.y+w.h>grid.rows)throw new Error('组件超出桌面范围');
    const out={id:w.id,type:w.type,label:String(w.label||TYPES[w.type]).slice(0,20),x:w.x,y:w.y,w:w.w,h:w.h};
    if(w.type==='note'&&w.content!==undefined)out.content=String(w.content).replace(/\r\n?/g,'\n').replace(/[\x00-\x09\x0b-\x1f]/g,' ').slice(0,2000);
+   if(w.type==='image'){
+    out.imageMode=w.imageMode==='mono'?'mono':'gray';
+    if(w.image!==undefined)out.image={gray:imageData(w.image?.gray),mono:imageData(w.image?.mono)};
+    const {fit,zoom,x,y}={...IMAGE_VIEW,...w.imageView};
+    if(!['contain','cover'].includes(fit)||!Number.isInteger(zoom)||zoom<25||zoom>400||![x,y].every(value=>Number.isInteger(value)&&Math.abs(value)<=100))throw new Error('图片缩放或裁剪设置无效');
+    out.imageView={fit,zoom,x,y};
+   }
    return out;
   });
   for(let i=0;i<out.length;i++)for(let j=i+1;j<out.length;j++)if(intersects(out[i],out[j]))throw new Error('组件不能重叠');
@@ -60,9 +92,20 @@
   if(width(str)>maxWidth){while(str&&width(str+'…')>maxWidth)str=str.slice(0,-1);str+='…';}
   return `<text x="${x}" y="${y}" font-size="${size}" ${extra}>${esc(str)}</text>`;
  }
- function chart(points,x,y,width,height){
-  let pieces=[],piece=[];points.slice(-60).forEach((v,i,values)=>{if(typeof v!=='number'||!Number.isFinite(v)){if(piece.length)pieces.push(piece);piece=[];}else piece.push(`${x+i/Math.max(1,values.length-1)*width},${y+height-Math.max(0,Math.min(100,v))/100*height}`);});if(piece.length)pieces.push(piece);
-  return pieces.filter(p=>p.length>1).map(p=>`<polyline points="${p.join(' ')}" fill="none" stroke="#111" stroke-width="3"/>`).join('');
+ function chart(history,key,end,x,y,width,height){
+  const start=end-180000;
+  let pieces=[],piece=[];
+  for(const point of history){
+   const timestamp=Date.parse(point.at);
+   if(!Number.isFinite(timestamp)||timestamp<start||timestamp>end)continue;
+   const value=point.values[key];
+   if(typeof value!=='number'||!Number.isFinite(value)){if(piece.length)pieces.push(piece);piece=[];}
+   else piece.push([x+(timestamp-start)/180000*width,y+height-Math.max(0,Math.min(100,value))/100*height]);
+  }
+  if(piece.length)pieces.push(piece);
+  return pieces.map(points=>points.length===1
+   ?`<circle cx="${points[0][0]}" cy="${points[0][1]}" r="3" fill="currentColor"/>`
+   :`<polyline points="${points.join(' ')}" fill="none" stroke="currentColor" stroke-width="3"/>`).join('');
  }
  function svg(config,sample,history=[],weather=null){
   const page=screen(config.orientation);
@@ -96,6 +139,19 @@
     body+=text(x+w/2,y+29,(at.getMonth()+1)+'月',18,'text-anchor="middle"');
     body+=text(x+w/2,y+h*.73,at.getDate(),compact?86:112,'font-weight="bold" text-anchor="middle"');
     body+=text(x+w/2,y+h-18,'星期'+week,17,'text-anchor="middle"');
+   }else if(widget.type==='image'){
+    if(widget.image){
+     const source=widget.image[widget.imageMode],native=imageSize(source),view=widget.imageView;
+     const fit=view.fit==='cover'?Math.max:Math.min;
+     const scale=fit(w/native.width,h/native.height)*view.zoom/100;
+     const width=native.width*scale,height=native.height*scale;
+     const left=x+(w-width)*(view.x+100)/200,top=y+(h-height)*(view.y+100)/200;
+     const clip=`image-clip-${widget.id}`;
+     const rendering=widget.imageMode==='mono'?' image-rendering="optimizeSpeed"':'';
+     body+=`<defs><clipPath id="${clip}"><rect x="${x}" y="${y}" width="${w}" height="${h}"/></clipPath></defs><image x="${left}" y="${top}" width="${width}" height="${height}" preserveAspectRatio="none" clip-path="url(#${clip})"${rendering} href="${source}"/>`;
+    }else{
+     body+=rounded(x,y,w,h,'#f7f7f7','#ddd')+text(x+w/2,y+h/2,'请选择图片',24,'text-anchor="middle"',w-24);
+    }
    }else if(widget.type==='note'){
     body+=`<path d="M${x} ${y}h${w-30}l30 30v${h-30}H${x}Z" fill="#fafafa" stroke="#b9b9b9" stroke-width="1.5"/><path d="M${x+w-30} ${y}v30h30" fill="none" stroke="#b9b9b9"/>`;
     body+=text(x+pad,y+35,widget.label,18,'',w-pad*2);
@@ -128,11 +184,19 @@
     items.forEach(([label,key],i)=>{const sy=y+112+i*rowH;body+=text(x+pad,sy,label,narrow?15:20,'',w*.52)+text(x+w-pad,sy+4,`${fmt(values[key])}${values[key]==null?'':'%'}`,narrow?20:30,'text-anchor="end"',w*.45);if(i<3)body+=rule(x+pad,sy+rowH*.54,w-pad*2);});
    }else if(widget.type==='trend'){
     body+=rounded(x,y,w,h,'#f7f7f7');body+=text(x+pad,y+43,widget.label,22,'',w-pad*2);
-    body+=text(x+pad,y+97,`${fmt(values.gpuTemp)}°`,narrow?34:48,'font-weight="bold"',w-pad*2)+text(x+w-pad,y+95,'GPU',17,'text-anchor="end"');
+    const half=(w-pad*2)/2;
+    for(const [index, label, key, color, dash] of [[0,'CPU','cpuTemp','#111',''],[1,'GPU','gpuTemp','#555',' stroke-dasharray="8 6"']]){
+     const left=x+pad+half*index;
+     const reading=values[key];
+     body+=`<path d="M${left} ${y+64}h22" stroke="${color}" stroke-width="3"${dash}/>`;
+     body+=text(left+29,y+69,label,17,'',half-29);
+     body+=text(left,y+102,reading==null?'—':`${fmt(reading)}°C`,narrow?24:34,'font-weight="bold"',half-4);
+    }
     const cy=y+(compact?105:135),ch=h-(compact?145:190);
     for(let i=0;i<4;i++)body+=rule(x+pad,cy+i/3*ch,w-pad*2,'#ddd');
-    body+=chart(history.map(p=>p.values.cpuTemp),x+pad,cy,w-pad*2,ch);body+=`<g stroke-dasharray="8 6">${chart(history.map(p=>p.values.gpuTemp),x+pad,cy,w-pad*2,ch)}</g>`;
-    body+=text(x+pad,y+h-22,'3 MIN / CPU —  GPU ···',narrow?13:16,'',w-pad*2);
+    body+=`<g color="#111">${chart(history,'cpuTemp',at.getTime(),x+pad,cy,w-pad*2,ch)}</g>`;
+    body+=`<g color="#555" stroke-dasharray="8 6">${chart(history,'gpuTemp',at.getTime(),x+pad,cy,w-pad*2,ch)}</g>`;
+    body+=text(x+pad,y+h-22,'最近 3 分钟',narrow?13:16,'',w-pad*2);
    }else{
     const value=values[widget.type],unit=/Temp/.test(widget.type)?'°C':widget.type==='memoryUsed'?'GB':widget.type==='gpuPower'?'W':'%';
     body+=rounded(x,y,w,h,'#f7f7f7')+text(x+pad,y+40,widget.label,21,'',w-pad*2)+text(x+pad,y+h*.68,`${fmt(value)}${value==null?'':unit}`,narrow?44:66,'font-weight="bold"',w-pad*2);
@@ -143,5 +207,5 @@
   body+=text(64,page.height-37,`更新于 ${at.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false})}`,18,'',page.width-536)+text(page.width-436,page.height-37,'天气 / Open-Meteo',14)+text(page.width-158,page.height-37,'PW5',18);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${page.width}" height="${page.height}" viewBox="0 0 ${page.width} ${page.height}">${body}</g></svg>`;
  }
- return{TYPES,GRID,screen,defaults,validate,rect,move,findSpace,svg};
+ return{TYPES,GRID,IMAGE_MAX_SIDE,IMAGE_VIEW,mapImage,screen,defaults,validate,rect,move,findSpace,svg};
 });

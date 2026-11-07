@@ -28,6 +28,7 @@ app.setPath('crashDumps',path.join(DATA,'crashes'));
 protocol.registerSchemesAsPrivileged([{scheme:'asset',privileges:{standard:true,secure:true,supportFetchAPI:true,corsEnabled:true}}]);
 if(!app.requestSingleInstanceLock()) app.quit();
 let window,tray,backgroundMode=false,config=Model.defaults(),sample=null,history=[],logs=[],auto=false,nextPush=0,sampling=false,exportChain=Promise.resolve(),stopping=false;
+let sampleTimer,saveChain=Promise.resolve();
 const sensors=new Sensors(DATA),transport=new Transport(),weather=new Weather();
 const state=()=>({config,sample,history,logs,auto,nextPush,busy:transport.busy,weather:weather.value});
 function broadcast(){if(window&&!window.isDestroyed()&&window.isVisible()&&!window.isMinimized())window.webContents.send('update',state());}
@@ -37,18 +38,34 @@ function log(message,level='info'){
 }
 async function saveConfig(input){
   const clean=Model.sanitize(input),file=path.join(DATA,'settings.json');
-  await fs.writeFile(file+'.tmp',JSON.stringify(clean,null,2),'utf8');
-  await fs.rename(file+'.tmp',file);config=clean;
-  weather.update(config).then(broadcast).catch(()=>{});
-  if(auto){sync.reset();nextPush=Date.now();}
-  broadcast();return config;
+  const operation=saveChain.catch(()=>{}).then(async()=>{
+    const intervalChanged=clean.sampleInterval!==config.sampleInterval;
+    await fs.writeFile(file+'.tmp',JSON.stringify(clean,null,2),'utf8');
+    await fs.rename(file+'.tmp',file);config=clean;
+    if(intervalChanged){scheduleSampling();void collect();}
+    weather.update(config).then(broadcast).catch(()=>{});
+    if(auto){sync.reset();nextPush=Date.now();}
+    broadcast();return clean;
+  });
+  saveChain=operation;
+  return operation;
+}
+function scheduleSampling(){
+  clearInterval(sampleTimer);
+  sampleTimer=setInterval(collect,config.sampleInterval*1000);
+}
+async function refreshHeartbeat(){
+  try{await fs.writeFile(path.join(DATA,'heartbeat'),String(Date.now()));}
+  catch(error){log('采集器心跳写入失败：'+error.message,'error');}
 }
 async function collect(){
   if(sampling||stopping)return;
   sampling=true;
   try{
-    await fs.writeFile(path.join(DATA,'heartbeat'),String(Date.now()));
-    sample=await sensors.collect(config);history.push(sample);history=history.slice(-60);broadcast();
+    sample=await sensors.collect(config);
+    const cutoff=Date.parse(sample.at)-180000;
+    history=history.filter(point=>Date.parse(point.at)>=cutoff);
+    history.push(sample);broadcast();
   }catch(e){log('采集失败：'+e.message,'error');}finally{sampling=false;}
 }
 async function renderPng(at=Date.now()){
@@ -129,14 +146,16 @@ app.whenReady().then(async()=>{
   });
   await openWindow();
   log('应用已启动，自动推送默认关闭');
+  await refreshHeartbeat();
+  const heartbeatTimer=setInterval(refreshHeartbeat,10000);
   await collect();
   const weatherTask=weather.update(config).then(broadcast).catch(()=>{});
   const weatherTimer=setInterval(()=>weather.update(config).then(broadcast).catch(()=>{}),60000);
-  const timer=setInterval(()=>collect(),3000);
+  scheduleSampling();
   const pushTimer=setInterval(()=>{
     if(auto&&sync.due(Date.now(),nextPush)&&!pushing)push().catch(()=>{});
   },250);
-  app.on('before-quit',()=>{clearInterval(timer);clearInterval(pushTimer);clearInterval(weatherTimer);});
+  app.on('before-quit',()=>{clearInterval(sampleTimer);clearInterval(heartbeatTimer);clearInterval(pushTimer);clearInterval(weatherTimer);});
   if(MEMORY_BENCH){
     const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
     async function measure(name){
@@ -154,7 +173,7 @@ app.whenReady().then(async()=>{
     const continued=sample.at!==before&&!window;
     await openWindow();await delay(2000);
     const restored=await window.webContents.executeJavaScript('!!window.kindle && !!document.querySelector("#kindle-preview svg")');
-    const report={at:new Date().toISOString(),hardwareAcceleration:process.argv.includes('--enable-gpu'),foreground,background,samplingContinued:continued,restored,scope:'30s each phase, 3s sampling; one full Maple-font PNG export before each phase; helper measured separately; no actual USB device push.'};
+    const report={at:new Date().toISOString(),hardwareAcceleration:process.argv.includes('--enable-gpu'),foreground,background,samplingContinued:continued,restored,scope:`30s each phase, ${config.sampleInterval}s sampling; one full Maple-font PNG export before each phase; helper measured separately; no actual USB device push.`};
     await fs.writeFile(path.join(DATA,'benchmark-memory.json'),JSON.stringify(report,null,2));console.log('MEMORY BENCHMARK',JSON.stringify(report));
     if(!continued||!restored)throw new Error('Background lifecycle failed');app.quit();
   }
@@ -171,7 +190,7 @@ app.whenReady().then(async()=>{
         const privateMiB=measurements.map(ms=>ms.reduce((sum,m)=>sum+(m.memory.privateBytes||0)/1024,0));
         const report={at:new Date().toISOString(),durationSeconds:seconds,processCount:end.length,cpuSeconds,wholeMachinePercent:cpuSeconds/seconds/require('node:os').cpus().length*100,
           workingSetSumMiB:{mean:workingMiB.reduce((a,b)=>a+b,0)/workingMiB.length,max:Math.max(...workingMiB)},privateMemorySumMiB:{mean:privateMiB.reduce((a,b)=>a+b,0)/privateMiB.length,max:Math.max(...privateMiB)},
-          baseline,end,scope:'Visible Electron app with 3s real sampling, preview updates, auto-push off, 10s warmup. Electron main/renderer/GPU/utility processes counted. Short-lived NVIDIA queries and elevated helper not included in Electron app metrics; see collector benchmark.'};
+          baseline,end,scope:`Visible Electron app with ${config.sampleInterval}s sampling, preview updates, auto-push off, 10s warmup. Electron main/renderer/GPU/utility processes counted. Short-lived NVIDIA queries and elevated helper not included in Electron app metrics; see collector benchmark.`};
         await fs.writeFile(path.join(DATA,'benchmark-electron.json'),JSON.stringify(report,null,2));
         console.log('BENCHMARK',JSON.stringify({...report,baseline:undefined,end:undefined}));app.quit();
       }
@@ -222,30 +241,95 @@ app.whenReady().then(async()=>{
       orientationChecks.push({orientation,...view,zoom:zoomCheck});
     }
     await fs.writeFile(path.join(DATA,'smoke-orientations.json'),JSON.stringify(orientationChecks,null,2));
+    const contentSize=window.getContentSize();
+    for(const [width,height] of [[1080,640],[1920,960]]){
+      window.setContentSize(width,height);
+      const layout=await window.webContents.executeJavaScript(`(async()=>{
+        await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+        document.querySelector('#preview-fit').click();
+        const left=document.querySelector('.left-column'),right=document.querySelector('.preview-panel'),viewport=document.querySelector('#preview-viewport');
+        return {ratio:left.offsetWidth/(left.offsetWidth+right.offsetWidth),client:[viewport.clientWidth,viewport.clientHeight],scroll:[viewport.scrollWidth,viewport.scrollHeight]};
+      })()`);
+      await fs.writeFile(path.join(DATA,`editor-fit-${width}.png`),(await window.webContents.capturePage()).toPNG());
+      if(layout.ratio<.37||layout.ratio>.45||layout.scroll.some((size,index)=>size>layout.client[index]+1))throw new Error('Editor layout failed: '+JSON.stringify({width,height,...layout}));
+    }
+    window.setContentSize(...contentSize);
     const customization=await window.webContents.executeJavaScript(`(()=>{
       const original=structuredClone(draft);
       selected=draft.widgets.find(w=>w.type==='note').id;renderEditor();
       const note=document.querySelector('#widget-content');note.value='第一行\\n第二行';note.dispatchEvent(new Event('input'));
       const noteSaved=M.sanitize(draft).widgets.find(w=>w.id===selected).content==='第一行\\n第二行';
-      document.querySelector('.nav[data-tab="connection"]').click();
+      document.querySelector('.nav[data-tab="settings"]').click();
       document.querySelector('#connection-mode').value='wifi';document.querySelector('#connection-mode').dispatchEvent(new Event('change'));
       document.querySelector('#wifi-host').value='192.168.1.123';document.querySelector('#interval').value='7';
       const wifiVisible=!document.querySelector('#wifi-address-field').classList.contains('hidden');
       const usbDisabled=document.querySelector('#host').disabled;
       const seconds=Number(document.querySelector('#interval').value);
       draft=original;editing=false;fillForms();updatePreview();
-      return{noteSaved,wifiVisible,usbDisabled,customSeconds:seconds===7};
+      const settings=document.querySelector('#settings-panel');
+      const centralized=['orientation','title','interval','sample-interval','connection-mode','weather-name','auto'].every(id=>settings.contains(document.getElementById(id)));
+      const previewHidden=document.querySelector('.preview-panel').offsetWidth===0;
+      return{noteSaved,wifiVisible,usbDisabled,customSeconds:seconds===7,centralized,previewHidden};
     })()`);
     if(Object.values(customization).some(value=>!value))throw new Error('Customization UI failed: '+JSON.stringify(customization));
     await fs.writeFile(path.join(DATA,'smoke-customization.json'),JSON.stringify(customization,null,2));
-    await fs.writeFile(path.join(DATA,'connection-preview.png'),(await window.webContents.capturePage()).toPNG());
-    const before=sample.at,execute=transport.execute;let backgroundSent=false;
-    enterBackground();transport.execute=async(file)=>{if(file.endsWith('scp.exe'))backgroundSent=true;return{stdout:''};};
+    await fs.writeFile(path.join(DATA,'settings-preview.png'),(await window.webContents.capturePage()).toPNG());
+    const initialConfig=config;
+    try{
+      const updated=await window.webContents.executeJavaScript(`(async()=>{
+        document.querySelector('#sample-interval').value='1';await saveAll();
+        return draft.sampleInterval===1 && document.querySelector('#sample-cadence').textContent==='1s';
+      })()`);
+      const saved=JSON.parse(await fs.readFile(path.join(DATA,'settings.json'),'utf8'));
+      if(!updated||saved.sampleInterval!==1)throw new Error('Sampling interval failed to save or update the badge');
+      const before=sample.at;
+      for(let i=0;i<80&&sample.at===before;i++)await new Promise(resolve=>setTimeout(resolve,100));
+      if(sample.at===before)throw new Error('Sampling did not resume after changing the interval');
+    }finally{await saveConfig(initialConfig);}
+    await window.webContents.executeJavaScript(`(async()=>update(await call('state')))()`);
+    await window.webContents.executeJavaScript('draft=structuredClone(state.config);fillForms();updatePreview()');
+    const imageCheck=await window.webContents.executeJavaScript(`(async()=>{
+      const original=structuredClone(draft);
+      try{
+        document.querySelector('.nav[data-tab="editor"]').click();
+        draft.widgets=[];
+        document.querySelector('#add-widget').value='image';
+        document.querySelector('#add').click();
+        const canvas=document.createElement('canvas');canvas.width=16;canvas.height=16;
+        const ctx=canvas.getContext('2d');ctx.fillStyle='#808080';ctx.fillRect(0,0,16,16);
+        const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
+        const files=new DataTransfer();files.items.add(new File([blob],'smoke.png',{type:'image/png'}));
+        const input=document.querySelector('#widget-image-file');input.files=files.files;
+        await input.onchange({target:input});
+        const mode=document.querySelector('#widget-image-mode');mode.value='mono';mode.dispatchEvent(new Event('change'));
+        for(const [id,value] of [['image-fit','cover'],['image-zoom','180'],['image-x','60']]){
+          const control=document.getElementById(id);control.value=value;control.dispatchEvent(new Event('input'));
+        }
+        const image=M.sanitize(draft).widgets.find(w=>w.type==='image');
+        const rendered=document.querySelector('#kindle-preview image');
+        return !!image?.image && image.imageMode==='mono' && image.imageView.fit==='cover' && image.imageView.zoom===180
+          && image.imageView.x===60 && rendered?.getAttribute('href')===image.image.mono && rendered.hasAttribute('clip-path');
+      }finally{draft=original;selected=draft.widgets[0]?.id;editing=false;fillForms();updatePreview();}
+    })()`);
+    if(!imageCheck)throw new Error('图片组件导入或预览失败');
+    const before=sample.at,savedConfig=config,request=transport.request;
+    let backgroundSent=false;
+    enterBackground();
+    config={...config,sampleInterval:1,connectionMode:'http',httpHost:'localhost',httpToken:'SMOKETEST'};
+    scheduleSampling();
+    transport.request=async spec=>{
+      if(spec.method==='GET'&&spec.path==='/status')return {status:200,body:'{"ok":true,"width":1236,"height":1648,"rotation":0}'};
+      if(spec.method!=='POST'||spec.path!=='/dashboard.png'||!spec.body?.length)throw new Error('模拟推送收到了无效请求');
+      backgroundSent=true;
+      return {status:200,body:'{"ok":true}'};
+    };
     auto=true;nextPush=Date.now();
     for(let i=0;i<100&&(!backgroundSent||pushing||sample.at===before);i++)await new Promise(resolve=>setTimeout(resolve,100));
     auto=false;
     if(pushing||!backgroundSent)throw new Error('模拟推送超时，测试未连接真实设备');
-    transport.execute=execute;
+    config=savedConfig;
+    scheduleSampling();
+    transport.request=request;
     const released=!app.getAppMetrics().some(item=>item.type==='Tab');
     await openWindow();await new Promise(resolve=>setTimeout(resolve,1000));
     const restored=await window.webContents.executeJavaScript('!!window.kindle && !!document.querySelector("#kindle-preview svg")');

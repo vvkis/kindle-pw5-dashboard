@@ -210,22 +210,21 @@ function DashboardWidget:_column(items)
     return VerticalGroup:new(spec)
 end
 
-function DashboardWidget:_pairingColumn(light_on_dark, content_w)
+function DashboardWidget:_pairingColumn(content_w)
     local info = self.plugin:statusLines()
-    local color = light_on_dark and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK
-    local face = Font:getFace("cfont", Screen:scaleBySize(light_on_dark and 22 or 26))
-    local face_small = Font:getFace("cfont", Screen:scaleBySize(light_on_dark and 18 or 20))
-    local token = self:_fittedToken(info.token, color, content_w, Screen:scaleBySize(light_on_dark and 36 or 48))
+    local color = Blitbuffer.COLOR_BLACK
+    local face = Font:getFace("cfont", Screen:scaleBySize(26))
+    local face_small = Font:getFace("cfont", Screen:scaleBySize(20))
+    local token = self:_fittedToken(info.token, color, content_w, Screen:scaleBySize(48))
     local label = TextWidget:new{ text = "重新生成", face = face_small, fgcolor = color }
     local button = FrameContainer:new{
         bordersize = Screen:scaleBySize(2),
         color = color,
         padding = Screen:scaleBySize(8),
         margin = 0,
-        background = light_on_dark and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE,
+        background = Blitbuffer.COLOR_WHITE,
         label,
     }
-    local hint = light_on_dark and (self.plugin.server_error and "服务未启动\n点此隐藏" or "点此隐藏") or nil
     local items = {
         self:_wrapped(info.address, face, color, content_w),
         VerticalSpan:new{ width = Screen:scaleBySize(8) },
@@ -236,15 +235,10 @@ function DashboardWidget:_pairingColumn(light_on_dark, content_w)
     }
     local button_index = #items + 1
     items[button_index] = button
-    if not light_on_dark then
-        items[#items + 1] = VerticalSpan:new{ width = Screen:scaleBySize(14) }
-        items[#items + 1] = self:_wrapped(info.note, face_small, color, content_w)
-        items[#items + 1] = VerticalSpan:new{ width = Screen:scaleBySize(6) }
-        items[#items + 1] = self:_wrapped("点按空白处退出", face_small, color, content_w)
-    elseif hint then
-        items[#items + 1] = VerticalSpan:new{ width = Screen:scaleBySize(8) }
-        items[#items + 1] = self:_wrapped(hint, face_small, color, content_w)
-    end
+    items[#items + 1] = VerticalSpan:new{ width = Screen:scaleBySize(14) }
+    items[#items + 1] = self:_wrapped(info.note, face_small, color, content_w)
+    items[#items + 1] = VerticalSpan:new{ width = Screen:scaleBySize(6) }
+    items[#items + 1] = self:_wrapped("点按空白处退出", face_small, color, content_w)
     return self:_column(items), button, button_index, info
 end
 
@@ -271,13 +265,13 @@ function DashboardWidget:showPlaceholder()
     local content_h = self.height - margin * 2
     self.mode = "placeholder"
     self.minute = parts.minute
-    self.address = self.plugin:statusLines().address
     self.last_mtime = nil
     self.overlay_top = nil
     self.overlay_bottom = nil
     local face_clock = Font:getFace("cfont", Screen:scaleBySize(56))
     local face = Font:getFace("cfont", Screen:scaleBySize(22))
-    local column, button, button_index = self:_pairingColumn(false, content_w)
+    local column, button, button_index, info = self:_pairingColumn(content_w)
+    self.address = info.address
     local clock = self:_wrapped(parts.clock, face_clock, Blitbuffer.COLOR_BLACK, content_w)
     local head = self:_column({
         clock,
@@ -366,29 +360,31 @@ function DashboardWidget:showImage(mtime, force_full)
     self.regenerate_hit = nil
     if self.plugin:showConnectionInfo() then
         local margin = self:_safeMargin()
-        local pad = Screen:scaleBySize(12)
+        local pad = Screen:scaleBySize(8)
         local border = Screen:scaleBySize(2)
         local inner_w = self.width - margin * 2 - (pad + border) * 2
         if inner_w < 80 then
             inner_w = 80
         end
-        local column, button, button_index = self:_pairingColumn(true, inner_w)
+        local info = self.plugin:statusLines()
+        local hint = self.plugin.server_error and "服务未启动 · 点此隐藏" or "点此隐藏"
+        local face = Font:getFace("cfont", Screen:scaleBySize(18))
+        local text = self:_wrapped(info.address .. "  ·  " .. info.token .. "  ·  " .. hint,
+            face, Blitbuffer.COLOR_BLACK, inner_w)
         local bar = FrameContainer:new{
             width = self.width - margin * 2,
-            background = Blitbuffer.COLOR_BLACK,
+            background = Blitbuffer.COLOR_WHITE,
             bordersize = border,
-            color = Blitbuffer.COLOR_WHITE,
+            color = Blitbuffer.COLOR_BLACK,
             padding = pad,
             margin = 0,
-            column,
+            text,
         }
         local bar_height = bar:getSize().h
         self.overlay_top = math.max(margin, self.height - margin - bar_height)
         self.overlay_bottom = self.overlay_top + bar_height
         bar.overlap_offset = { margin, self.overlay_top }
-        self:_placeButton(margin + border + pad, self.overlay_top + border + pad, inner_w, column, button_index, button)
         stack[#stack + 1] = bar
-        local info = self.plugin:statusLines()
         self.overlay_address = info.address .. info.token
     end
     self:_replace(OverlapGroup:new(stack), full and "full" or "partial")
@@ -581,6 +577,25 @@ function Dashboard:token()
 end
 
 function Dashboard:_localIp()
+    local NetworkMgr = require("ui/network/manager")
+    local interface = NetworkMgr:getNetworkInterfaceName()
+    if interface then
+        -- A Wi-Fi network can have an IPv4 address without a default route.
+        local netinfo = require("ffi/netinfo"):new()
+        local ok, interfaces = pcall(netinfo.retrieve, netinfo)
+        netinfo:free()
+        if ok then
+            for _, iface in ipairs(interfaces) do
+                if iface.name == interface and iface.ipv4 then
+                    -- KOReader joins multiple addresses with " / ". Show one host for pairing.
+                    return iface.ipv4:match("^%S+")
+                end
+            end
+        end
+        return nil
+    end
+
+    -- Devices without a named Wi-Fi interface can still use their routed address.
     local ok, socket = pcall(require, "socket")
     if not ok or not socket or not socket.udp then
         return nil
@@ -986,11 +1001,13 @@ function Dashboard:onTick(widget)
     self:_touchLease()
     local mtime = self:_imageMtime()
     if mtime then
-        local info = self:statusLines()
-        local overlay_stale = widget.mode == "image" and self:showConnectionInfo()
-            and widget.overlay_address ~= (info.address .. info.token)
-        if mtime ~= widget.last_mtime or widget.mode ~= "image" or overlay_stale then
+        if mtime ~= widget.last_mtime or widget.mode ~= "image" then
             widget:showImage(mtime, false)
+        elseif self:showConnectionInfo() then
+            local info = self:statusLines()
+            if widget.overlay_address ~= (info.address .. info.token) then
+                widget:showImage(mtime, false)
+            end
         end
         return
     end
@@ -1051,7 +1068,7 @@ end
 function Dashboard:showSettings()
     local dialog
     dialog = ButtonDialog:new{
-        title = _("看板连接"),
+        title = _("看板连接") .. "\n" .. self:statusLines().address,
         title_align = "center",
         buttons = {
             {{
@@ -1076,6 +1093,14 @@ function Dashboard:showSettings()
                     if not self.widget then
                         self:open()
                     end
+                    local info = self:statusLines()
+                    UIManager:show(InfoMessage:new{
+                        text = string.format("%s\n\n%s\n%s\n\n%s", _("看板连接"), info.address,
+                            _("配对口令") .. " " .. info.token, info.note),
+                        alignment = "center",
+                        show_icon = false,
+                        honor_silent_mode = false,
+                    })
                 end,
             }},
             {{

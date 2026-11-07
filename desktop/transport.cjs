@@ -14,20 +14,28 @@ function readPage(buffer, config) {
   if(image.width!==page.width||image.height!==page.height||buffer[24]!==8||buffer[25]!==0)throw new Error(`图片必须是 ${page.width}×${page.height} 的 8-bit 灰阶 PNG`);
   return image;
 }
-function deviceImage(buffer, config) {
-  const image=readPage(buffer, config);
-  if(config.orientation!=='landscape')return buffer;
-  // Keep the framebuffer in its native portrait orientation; compensate for physical placement.
-  const native=new PNG({width:1236,height:1648});
-  for(let y=0;y<image.height;y++)for(let x=0;x<image.width;x++){
-    const dx=config.landscapeTop==='right'?y:image.height-1-y;
-    const dy=config.landscapeTop==='right'?image.width-1-x:x;
-    image.data.copy(native.data,(dy*native.width+dx)*4,(y*image.width+x)*4,(y*image.width+x)*4+4);
-  }
-  return PNG.sync.write(native,{colorType:0,inputColorType:6,bitDepth:8});
+function placementTurns(config) {
+  if(config.orientation!=='landscape')return 0;
+  return config.landscapeTop==='right'?3:1;
 }
-// SSH + eips still targets the Kindle framebuffer. The KOReader plugin displays the
-// readable PNG, so HTTP and "eips off" uploads keep the preview orientation.
+function rotateImage(buffer, image, turns) {
+  if(turns===0)return buffer;
+  const {width,height}=image;
+  const rotated=new PNG(turns===2?{width,height}:{width:height,height:width});
+  for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+    let dx,dy;
+    if(turns===1){dx=height-1-y;dy=x;}
+    else if(turns===2){dx=width-1-x;dy=height-1-y;}
+    else{dx=y;dy=width-1-x;}
+    const offset=(y*width+x)*4;
+    image.data.copy(rotated.data,(dy*rotated.width+dx)*4,offset,offset+4);
+  }
+  return PNG.sync.write(rotated,{colorType:0,inputColorType:6,bitDepth:8});
+}
+function deviceImage(buffer, config) {
+  return rotateImage(buffer, readPage(buffer, config), placementTurns(config));
+}
+// SSH + eips targets the native framebuffer. File-only SSH uploads keep the preview orientation.
 function wantsFramebuffer(config) {
   return config.connectionMode!=='http' && config.eipsRefresh!==false;
 }
@@ -114,13 +122,16 @@ class Transport {
     catch(error) {throw new Error(explain(error));}
   }
   async testHttp(config) {
+    const status=await this.readHttpStatus(config);
+    const size=status.width&&status.height?`，屏幕 ${status.width}×${status.height}`:'';
+    return {ok:true,message:`看板插件已连接${size}`};
+  }
+  async readHttpStatus(config) {
     const spec=httpCall(config,'GET','/status',null);
     let response;
     try{response=await this.request(spec);}catch(error){throw httpFailure(error);}
     if(response.status!==200)throw new Error(explainHttp(response.status));
-    const status=parseStatus(response.body);
-    const size=status.width&&status.height?`，屏幕 ${status.width}×${status.height}`:'';
-    return {ok:true,message:`看板插件已连接${size}`};
+    return parseStatus(response.body);
   }
   async push(config, pngPath) {
     const c=sanitize(config);
@@ -131,7 +142,12 @@ class Transport {
     if(this.busy) throw new Error('上一轮推送仍在进行');
     this.busy=true;
     try {
-      const payload=payloadFor(await fs.readFile(pngPath), config);
+      const buffer=await fs.readFile(pngPath);
+      const image=readPage(buffer,config);
+      const {rotation}=await this.readHttpStatus(config);
+      if(![0,1,2,3].includes(rotation))throw new Error('看板插件返回了无法识别的屏幕方向');
+      // KOReader maps its logical coordinates to the native panel by -rotation quarter turns.
+      const payload=rotateImage(buffer,image,(placementTurns(config)+rotation)%4);
       const spec=httpCall(config,'POST','/dashboard.png',payload);
       let response;
       try{response=await this.request(spec);}catch(error){throw httpFailure(error);}

@@ -1,6 +1,6 @@
 {
   "name": "kindle-monitor",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "packageManager": "pnpm@10.20.0",
     "description": "Editable PC hardware monitor for Kindle PW5 via the KOReader dashboard plugin or SSH",

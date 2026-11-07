@@ -32,6 +32,9 @@ test('configuration rejects command injection, invalid coordinates, unknown or d
  assert.throws(()=>M.sanitize({httpHost:'bad host'}));
  assert.equal(M.sanitize({eipsRefresh:false}).eipsRefresh,false);
  assert.equal(M.sanitize({}).eipsRefresh,true);
+ assert.equal(M.sanitize({}).sampleInterval,3);
+ assert.equal(M.sanitize({sampleInterval:'300'}).sampleInterval,300);
+ for(const seconds of [0,1.5,301])assert.throws(()=>M.sanitize({sampleInterval:seconds}),/采集间隔/);
 });
 test('SVG escapes editable text, uses Maple, and retains clock/weather/footer',()=>{
  const c=M.defaults();c.title='<script>&';c.note='测试留言';const s={at:'2026-11-06T10:00:00Z',hostname:'<host>',values:{gpuTemp:37}};
@@ -168,11 +171,87 @@ test('independent multiline notes and font weights persist through layout edits'
  assert.equal(empty.split('底部留言').length-1,1,'empty note must not inherit footer');
 });
 
-function grayPng(width, height) {
+function grayPng(width, height, corners) {
  const png=new PNG({width,height});
  png.data.fill(255);
+ if(corners){
+  const offsets=[0,width-1,(height-1)*width,width*height-1];
+  offsets.forEach((offset,index)=>png.data.fill(corners[index],offset*4,offset*4+3));
+ }
  return PNG.sync.write(png,{colorType:0,inputColorType:6,bitDepth:8});
 }
+
+test('an image widget keeps both ink modes through saving and uses the selected mode in the PNG',async()=>{
+ const source=new PNG({width:4,height:4});
+ for(let i=0;i<source.data.length;i+=4)source.data.set([0,178,0,255],i);
+ const encode=()=>`data:image/png;base64,${PNG.sync.write(source).toString('base64')}`;
+ W.mapImage(source.data,source.width);
+ const gray=encode();
+ assert.equal(source.data[0],127);
+ W.mapImage(source.data,source.width,true);
+ const mono=encode();
+ assert.deepEqual(new Set(source.data.filter((_,i)=>i%4===0)),new Set([0,255]));
+
+ const widget={id:'picture',type:'image',x:0,y:0,w:2,h:1,image:{gray,mono},imageMode:'mono'};
+ const config=M.sanitize(JSON.parse(JSON.stringify(M.sanitize({widgets:[widget]}))));
+ assert.deepEqual(config.widgets[0].image,widget.image);
+ assert.throws(()=>M.sanitize({widgets:[{...widget,image:{gray:'file:///private.png',mono}}]}),/图片无效/);
+ const dir=await fs.mkdtemp(path.join(ROOT,'out','image-widget-'));
+ try{
+  const file=path.join(dir,'dashboard.png');
+  const box=W.rect(widget),x=Math.floor(box.x+box.width/2),y=Math.floor(box.y+box.height/2);
+  for(const mode of ['gray','mono']){
+   config.widgets[0].imageMode=mode;
+   await Raster.renderPng(config,{at:'2026-11-06T10:00:00Z',values:{}},[],path.join(ROOT,'vendor/fonts'),file);
+   const png=PNG.sync.read(await fs.readFile(file));
+   const tones=new Set();
+   for(let row=y-80;row<y+80;row++)for(let col=x-80;col<x+80;col++)tones.add(png.data[(row*png.width+col)*4]);
+   assert.deepEqual(tones,new Set(mode==='gray'?[127]:[0,255]));
+  }
+ }finally{await fs.rm(dir,{recursive:true,force:true});}
+});
+
+test('an image widget saves crop settings and clips the export to the selected edge',async()=>{
+ const source=new PNG({width:12,height:4});
+ for(let y=0;y<source.height;y++)for(let x=0;x<source.width;x++){
+  const shade=x<4?20:x<8?120:220;
+  source.data.set([shade,shade,shade,255],(y*source.width+x)*4);
+ }
+ const data=`data:image/png;base64,${PNG.sync.write(source).toString('base64')}`;
+ const imageView={fit:'cover',zoom:200,x:100,y:0};
+ const widget={id:'crop',type:'image',x:0,y:0,w:1,h:1,image:{gray:data,mono:data},imageView};
+ const config=M.sanitize(JSON.parse(JSON.stringify(M.sanitize({widgets:[widget]}))));
+ assert.deepEqual(config.widgets[0].imageView,imageView);
+ assert.deepEqual(M.sanitize({widgets:[{...widget,imageView:undefined}]}).widgets[0].imageView,W.IMAGE_VIEW);
+ assert.throws(()=>M.sanitize({widgets:[{...widget,imageView:{...imageView,zoom:401}}]}),/裁剪设置无效/);
+ const dir=await fs.mkdtemp(path.join(ROOT,'out','image-crop-'));
+ try{
+  const file=path.join(dir,'dashboard.png'),box=W.rect(widget);
+  for(const [position,shade] of [[100,220],[-100,20]]){
+   config.widgets[0].imageView.x=position;
+   await Raster.renderPng(config,{at:'2026-11-06T10:00:00Z',values:{}},[],path.join(ROOT,'vendor/fonts'),file);
+   const png=PNG.sync.read(await fs.readFile(file));
+   const y=Math.floor(box.y+box.height/2),sample=x=>png.data[(y*png.width+x)*4];
+   assert.equal(sample(Math.floor(box.x+box.width/2)),shade);
+   assert.equal(sample(box.x-2),255);
+   assert.equal(sample(box.x+box.width+2),255);
+  }
+ }finally{await fs.rm(dir,{recursive:true,force:true});}
+});
+
+test('temperature trend shows separate CPU and GPU readings and traces',()=>{
+ const config=M.sanitize({widgets:[{id:'trend',type:'trend',x:0,y:0,w:1,h:1}]});
+ const first={at:'2026-11-06T09:59:50Z',values:{cpuTemp:50,gpuTemp:35}};
+ const latest={at:'2026-11-06T10:00:00Z',values:{cpuTemp:61.2,gpuTemp:42.5}};
+ const svg=M.dashboardSvg(config,latest,[first,latest]);
+ assert.match(svg,/>CPU<\/text>/);
+ assert.match(svg,/>GPU<\/text>/);
+ assert.match(svg,/>61\.2°C<\/text>/);
+ assert.match(svg,/>42\.5°C<\/text>/);
+ assert.match(svg,/<g color="#111"><polyline/);
+ assert.match(svg,/<g color="#555" stroke-dasharray="8 6"><polyline/);
+ assert.match(M.dashboardSvg(config,latest,[latest]),/<g color="#111"><circle/);
+});
 
 test('SSH install renames atomically and eips is optional',()=>{
  const temp='/mnt/us/dashboard.abc-def.tmp.png';
@@ -217,7 +296,7 @@ test('HTTP mode uploads the PNG with a bearer token and never opens SSH',async()
   const calls=[];
   const transport=new Transport(async()=>{throw new Error('SSH should not run');}, async spec=>{
    calls.push(spec);
-   if(spec.path==='/status')return {status:200,body:JSON.stringify({ok:true,version:'1',width:1236,height:1648,orientation:'portrait'})};
+   if(spec.path==='/status')return {status:200,body:JSON.stringify({ok:true,version:'1',width:1236,height:1648,orientation:'portrait',rotation:0})};
    assert.equal(spec.path,'/dashboard.png');
    assert.equal(spec.method,'POST');
    assert.equal(spec.headers.Authorization,'Bearer abc123token');
@@ -230,11 +309,43 @@ test('HTTP mode uploads the PNG with a bearer token and never opens SSH',async()
   assert.equal(status.message.includes('1236×1648'),true);
   const pushed=await transport.push(config,file);
   assert.equal(pushed.message,'已通过看板插件更新图片');
-  assert.equal(calls.length,2);
+  assert.deepEqual(calls.map(call=>call.path),['/status','/status','/dashboard.png']);
   const spec=httpCall(config,'POST','/dashboard.png',Buffer.from('x'));
   assert.equal(spec.host,'192.168.1.20');
   assert.equal(spec.port,8686);
   assert.equal(spec.path.includes(config.httpToken),false);
+ }finally{await fs.rm(dir,{recursive:true,force:true});}
+});
+
+test('HTTP fits the Kindle screen and preserves the selected physical placement',async()=>{
+ const dir=await fs.mkdtemp(path.join(ROOT,'out','http-rotation-'));
+ try{
+  const file=path.join(dir,'dashboard.png');
+  const corners=[11,22,33,44];
+  const landscape=grayPng(1648,1236,corners),portrait=grayPng(1236,1648,corners);
+  const config={connectionMode:'http',httpHost:'kindle.local',httpToken:'abc123token'};
+  for(const [orientation,landscapeTop,rotation,expected] of [
+   ['landscape','left',0,[33,11,44,22]],
+   ['landscape','right',0,[22,44,11,33]],
+   ['landscape','left',3,corners],
+   ['landscape','right',1,corners],
+   ['landscape','left',1,[44,33,22,11]],
+   ['portrait','left',3,[22,44,11,33]],
+  ]){
+   const source=orientation==='landscape'?landscape:portrait;
+   await fs.writeFile(file,source);
+   const [width,height]=rotation%2?[1648,1236]:[1236,1648];
+   const transport=new Transport(async()=>{throw new Error('SSH should not run');},async spec=>{
+    if(spec.path==='/status')return {status:200,body:JSON.stringify({ok:true,width,height,rotation})};
+    const image=PNG.sync.read(spec.body);
+    assert.deepEqual([image.width,image.height],[width,height]);
+    assert.equal(spec.body[25],0);
+    assert.deepEqual([0,width-1,(height-1)*width,width*height-1].map(offset=>image.data[offset*4]),expected);
+    if(expected===corners)assert.deepEqual(spec.body,source);
+    return {status:200,body:'{"ok":true}'};
+   });
+   await transport.push({...config,orientation,landscapeTop},file);
+  }
  }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
 

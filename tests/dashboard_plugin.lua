@@ -77,4 +77,54 @@ eq(script:find("init.d", 1, true) ~= nil, false, "no init script")
 eq(protocol.IMAGE_PATH, "/mnt/us/dashboard.png", "image path")
 eq(protocol.TEMP_PATH:sub(1, 8), "/mnt/us/", "temp stays on the same filesystem")
 
+-- Load the real plugin with the KOReader UI and network dependencies stubbed.
+local searchers = package.searchers or package.loaders
+local widget = { extend = function(_, spec) return spec end, new = function(_, spec) return spec end }
+table.insert(searchers, 1, function(name)
+    if name:match("^ui/") or name == "device" or name == "ffi/blitbuffer"
+        or name == "dispatcher" or name == "pluginshare" or name == "logger"
+        or name == "libs/libkoreader-lfs" then
+        return function() return widget end
+    elseif name == "gettext" then
+        return function() return function(text) return text end end
+    end
+end)
+local wifi = { name = "wlan0", ipv4 = "192.168.43.25" }
+local freed = 0
+local shown
+package.loaded["ui/uimanager"] = { show = function(_, spec) shown = spec end, close = function() end }
+package.loaded["ui/network/manager"] = { getNetworkInterfaceName = function() return "wlan0" end }
+package.loaded["ffi/netinfo"] = {
+    new = function()
+        return {
+            retrieve = function() return { { name = "usb0", ipv4 = "192.168.15.244" }, wifi } end,
+            free = function() freed = freed + 1 end,
+        }
+    end,
+}
+package.loaded.socket = {
+    udp = function()
+        return { settimeout = function() end, setpeername = function() return nil end, close = function() end }
+    end,
+}
+local dashboard = require("main")
+table.remove(searchers, 1)
+function dashboard:port() return 8686 end
+function dashboard:pollSeconds() return 10 end
+function dashboard:token() return "K7MP4Q2R" end
+eq(dashboard:statusLines().address, "192.168.43.25:8686", "show the Wi-Fi IP even without a default route")
+wifi.ipv4 = "10.0.0.26 / 10.0.0.27"
+eq(dashboard:statusLines().address, "10.0.0.26:8686", "refresh after reconnect and show a single address")
+wifi.ipv4 = nil
+eq(dashboard:statusLines().address, "未获取到 IP:8686", "do not display the USB address when Wi-Fi has no IPv4")
+eq(freed, 3, "free each network snapshot")
+wifi.ipv4 = "192.168.43.25"
+function dashboard:setShowConnectionInfo() end
+function dashboard:open() end
+dashboard:showSettings()
+eq(shown.title, "看板连接\n192.168.43.25:8686", "show the address directly in the settings dialog")
+shown.buttons[3][1].callback()
+eq(shown.text:find("192.168.43.25:8686", 1, true) ~= nil, true, "connection dialog shows the address")
+eq(shown.text:find("K7MP4Q2R", 1, true) ~= nil, true, "connection dialog shows the pairing token")
+
 print("dashboard protocol ok")

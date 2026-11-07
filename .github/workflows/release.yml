@@ -1,4 +1,4 @@
-name: Build Windows release draft
+name: Build Kindle Monitor release
 
 on:
   push:
@@ -39,25 +39,29 @@ jobs:
         run: pnpm test
       - name: Check desktop rendering and editing
         run: pnpm smoke
-      - name: Build clean Windows ZIP
+      - name: Build Windows and KOReader ZIPs
         run: pnpm release
-      - name: Create draft and upload ZIP with checksum
+      - name: Upload release packages and checksums
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $asset = "dist/Kindle-Monitor-$version-win-x64.zip"
-          $checksum = "$asset.sha256"
-          $hash = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $([IO.Path]::GetFileName($asset))" | Set-Content -LiteralPath $checksum -Encoding ascii
+          $windows = "dist/Kindle-Monitor-$version-win-x64.zip"
+          $plugin = "dist/Kindle-Dashboard-Plugin-$version.zip"
+          $assets = @($windows, "$windows.sha256", $plugin, "$plugin.sha256")
           $notes = "docs/releases/$($env:GITHUB_REF_NAME).md"
           if (!(Test-Path -LiteralPath $notes)) { throw 'Release notes missing.' }
           $existing = gh release view $env:GITHUB_REF_NAME --repo $env:GITHUB_REPOSITORY --json isDraft 2>$null
           if ($LASTEXITCODE -eq 0) {
             if (!(($existing | ConvertFrom-Json).isDraft)) { throw 'Refusing to replace an already published release.' }
-            gh release upload $env:GITHUB_REF_NAME $asset $checksum --repo $env:GITHUB_REPOSITORY --clobber
+            gh release upload $env:GITHUB_REF_NAME @assets --repo $env:GITHUB_REPOSITORY --clobber
           } else {
-            gh release create $env:GITHUB_REF_NAME $asset $checksum --repo $env:GITHUB_REPOSITORY --verify-tag --target $env:GITHUB_SHA --draft --title "Kindle Monitor $($env:GITHUB_REF_NAME)" --notes-file $notes
+            gh release create $env:GITHUB_REF_NAME @assets --repo $env:GITHUB_REPOSITORY --verify-tag --draft --title "Kindle Monitor $($env:GITHUB_REF_NAME)" --notes-file $notes
           }
           if ($LASTEXITCODE -ne 0) { throw 'Draft release upload failed.' }
+          $annotation = git for-each-ref --format='%(objecttype) %(contents:subject)' "refs/tags/$env:GITHUB_REF_NAME"
+          if ($annotation -eq "tag Publish Kindle Monitor $env:GITHUB_REF_NAME") {
+            gh release edit $env:GITHUB_REF_NAME --repo $env:GITHUB_REPOSITORY --draft=false --latest
+            if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }
+          }

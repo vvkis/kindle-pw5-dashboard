@@ -16,7 +16,7 @@
     title: '工作站监控', note: '保持专注，保持冷静。',
     host: '192.168.15.244', wifiHost: '', connectionMode: 'http', port: 22, identityFile: '', pushInterval: 60, fontWeight: 700,
     httpHost: '', httpPort: 8686, httpToken: '', eipsRefresh: true,
-    cpuSensor: '', layout: 'cards', showChart: true,
+    cpuSensor: '', sampleInterval: 3, layout: 'cards', showChart: true,
     weather: { name: '广州', latitude: 23.1291, longitude: 113.2644, enabled: true },
     widgets: Widgets.defaults(),
     orientation: 'portrait', landscapeTop: 'left',
@@ -55,6 +55,11 @@
         if (!Number.isInteger(Number(input[key])) || Number(input[key]) < min || Number(input[key]) > max) throw new Error(`${key} 超出范围`);
         out[key] = Number(input[key]);
       }
+    }
+    if(input.sampleInterval!==undefined){
+      const seconds=Number(input.sampleInterval);
+      if(!Number.isInteger(seconds)||seconds<1||seconds>300)throw new Error('采集间隔须为 1–300 秒的整数');
+      out.sampleInterval=seconds;
     }
     out.layout = input.layout === 'rows' ? 'rows' : 'cards';
     out.showChart = input.showChart !== false;

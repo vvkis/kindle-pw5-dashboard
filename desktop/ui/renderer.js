@@ -17,7 +17,7 @@ function renderTiles(){
  }));
 }
 function updatePreview(){
- if(!state||dragging)return;
+ if(!state||dragging||activeTab==='settings')return;
  const page=W.screen(draft.orientation),grid=page.grid;
  const preview=$('kindle-preview');preview.style.aspectRatio=page.width+'/'+page.height;
  const panel=document.querySelector('.preview-panel');panel.classList.toggle('landscape',draft.orientation==='landscape');panel.classList.toggle('landscape-top-right',draft.landscapeTop==='right');
@@ -48,6 +48,7 @@ function update(next){
  $('weather-description').textContent=weather?`${weather.condition} · ${M.format(weather.low)}° / ${M.format(weather.high)}°${weather.stale?' · 缓存':''}`:'天气暂不可用';
  $('weather-icon').textContent=weather?(weather.code===0?'☀':weather.code<=3?'☁':weather.code>=51?'☂':'≋'):'☁';
  $('sample-time').textContent=state.sample?'采样 '+new Date(state.sample.at).toLocaleTimeString('zh-CN',{hour12:false}):'等待采样…';
+ $('sample-cadence').textContent=state.config.sampleInterval+'s';
  $('cpu-name').textContent=state.sample?.cpuName||'CPU';$('gpu-name').textContent=state.sample?.gpuName||'GPU';$('memory-total').textContent=state.sample?state.sample.memoryTotal.toFixed(1)+' GB 内存':'';
  const cpu=state.sample?.values.cpuTemp;
  $('sensor-heading').textContent=cpu==null?'连接 CPU 温度传感器':'CPU 温度已连接';
@@ -63,11 +64,18 @@ function fillForms(){
  for(const id of ['title','note','host','port'])$(id).value=draft[id];
  $('identity-file').value=draft.identityFile;$('connection-mode').value=draft.connectionMode;$('wifi-host').value=draft.wifiHost;$('http-host').value=draft.httpHost;$('http-port').value=draft.httpPort;$('http-token').value=draft.httpToken;$('eips-refresh').checked=draft.eipsRefresh!==false;$('font-weight').value=draft.fontWeight;renderConnection();
  $('orientation').value=draft.orientation;$('landscape-top').value=draft.landscapeTop;$('landscape-placement').classList.toggle('hidden',draft.orientation!=='landscape');
- $('weather-name').value=draft.weather.name;$('latitude').value=draft.weather.latitude;$('longitude').value=draft.weather.longitude;$('show-weather').checked=draft.weather.enabled;
+ fillWeather();
  $('interval').value=draft.pushInterval;
+ $('sample-interval').value=draft.sampleInterval;
  $('cpu-sensor').replaceChildren(new Option('自动选择 CPU Package / Tctl/Tdie',''),...(state.sample?.sensors||[]).filter(s=>/cpu/i.test(s.id)).map(s=>new Option(`${s.name} · ${M.format(s.value)}°C`,s.id)));
  if(draft.cpuSensor&&!Array.from($('cpu-sensor').options).some(o=>o.value===draft.cpuSensor))$('cpu-sensor').add(new Option(draft.cpuSensor,draft.cpuSensor));
  $('cpu-sensor').value=draft.cpuSensor;renderEditor();
+}
+function fillWeather(){
+ $('weather-name').value=draft.weather.name;
+ $('latitude').value=draft.weather.latitude;
+ $('longitude').value=draft.weather.longitude;
+ $('show-weather').checked=draft.weather.enabled;
 }
 function renderEditor(){
  if(!draft)return;
@@ -76,29 +84,49 @@ function renderEditor(){
  for(const option of $('widget-size').options)option.disabled=Number(option.value.split(',')[0])>W.screen(draft.orientation).grid.columns;
  $('note-content-field').classList.toggle('hidden',current?.type!=='note');
  if(current?.type==='note')$('widget-content').value=current.content??draft.note;
+ const isImage=current?.type==='image';
+ $('widget-image-file-field').classList.toggle('hidden',!isImage);
+ $('widget-image-mode-field').classList.toggle('hidden',!isImage);
+ $('widget-image-view').classList.toggle('hidden',!isImage||!current.image);
+ if(isImage){
+  $('widget-image-mode').value=current.imageMode??'gray';
+  $('widget-image-status').textContent=current.image?'已导入，可选择新文件替换':'PNG、JPG、WebP，最大 20 MB';
+  const view=current.imageView??W.IMAGE_VIEW;
+  for(const key of ['fit','zoom','x','y'])$('image-'+key).value=view[key];
+  $('image-zoom-value').textContent=view.zoom+'%';
+ }
  if(current){$('widget-label').value=current.label;$('widget-size').value=current.w+','+current.h;}
 }
 document.querySelectorAll('.nav').forEach(button=>button.onclick=()=>{
  document.querySelectorAll('.nav').forEach(b=>b.classList.toggle('active',b===button));
  const tab=button.dataset.tab;
  activeTab=tab;
- document.querySelector('.content-grid').classList.toggle('edit-mode',tab==='editor');
- for(const name of ['overview','editor','connection'])$(name+'-panel').classList.toggle('hidden',tab!==name);
+ const grid=document.querySelector('.content-grid');
+ grid.classList.toggle('edit-mode',tab==='editor');
+ grid.classList.toggle('settings-mode',tab==='settings');
+ for(const name of ['overview','editor','settings'])$(name+'-panel').classList.toggle('hidden',tab!==name);
  $('page-name').textContent=button.textContent.trim().slice(1).trim();
- const headings={overview:['桌面一览','时间、天气与电脑状态，都在这里。'],editor:['编辑桌面','像整理手机桌面一样，安排每一块小组件。'],connection:['连接 Kindle','推荐打开 Kindle 上的看板模式，用 Wi-Fi 接收图片。']};
+ const headings={overview:['桌面一览','时间、天气与电脑状态，都在这里。'],editor:['编辑桌面','添加、移动和调整组件，右侧实时预览。'],settings:['设置','管理屏幕、采集、推送、设备连接和天气。']};
  $('heading').textContent=headings[tab][0];$('subtitle').textContent=headings[tab][1];
  updatePreview();
 });
 for(const id of ['title','note'])$(id).addEventListener('input',()=>{draft[id]=$(id).value;editing=true;updatePreview();});
-for(const id of ['host','wifi-host','port','identity-file','interval','cpu-sensor','http-host','http-port','http-token'])$(id).addEventListener('input',()=>{editing=true;});
+for(const id of ['host','wifi-host','port','identity-file','interval','sample-interval','cpu-sensor','http-host','http-port','http-token'])$(id).addEventListener('input',()=>{editing=true;});
 $('eips-refresh').addEventListener('change',()=>{editing=true;});
 async function saveAll(){
- const clean={...draft,title:$('title').value,note:$('note').value,orientation:$('orientation').value,landscapeTop:$('landscape-top').value,connectionMode:$('connection-mode').value,wifiHost:$('wifi-host').value.trim(),httpHost:$('http-host').value.trim(),httpPort:Number($('http-port').value),httpToken:$('http-token').value.trim(),eipsRefresh:$('eips-refresh').checked,fontWeight:Number($('font-weight').value),host:$('host').value.trim(),port:Number($('port').value),identityFile:$('identity-file').value.trim(),pushInterval:Number($('interval').value),cpuSensor:$('cpu-sensor').value,weather:{name:$('weather-name').value,latitude:Number($('latitude').value),longitude:Number($('longitude').value),enabled:$('show-weather').checked}};
- draft=await call('save',clean);editing=false;toast('设置已保存');updatePreview();
+ const clean={...draft,title:$('title').value,note:$('note').value,orientation:$('orientation').value,landscapeTop:$('landscape-top').value,connectionMode:$('connection-mode').value,wifiHost:$('wifi-host').value.trim(),httpHost:$('http-host').value.trim(),httpPort:Number($('http-port').value),httpToken:$('http-token').value.trim(),eipsRefresh:$('eips-refresh').checked,fontWeight:Number($('font-weight').value),host:$('host').value.trim(),port:Number($('port').value),identityFile:$('identity-file').value.trim(),pushInterval:Number($('interval').value),sampleInterval:Number($('sample-interval').value),cpuSensor:$('cpu-sensor').value,weather:{name:$('weather-name').value,latitude:Number($('latitude').value),longitude:Number($('longitude').value),enabled:$('show-weather').checked}};
+ draft=await call('save',clean);editing=false;$('sample-cadence').textContent=draft.sampleInterval+'s';toast('设置已保存');updatePreview();
 }
-$('save-editor').onclick=()=>action($('save-editor'),saveAll);$('save-connection').onclick=()=>action($('save-connection'),saveAll);
+$('save-editor').onclick=()=>action($('save-editor'),saveAll);$('save-settings').onclick=()=>action($('save-settings'),saveAll);
 $('add-widget').replaceChildren(...Object.entries(W.TYPES).map(([key,label])=>new Option(label,key)));
-$('add').onclick=()=>{const type=$('add-widget').value,space=W.findSpace(draft.widgets,2,1,draft.orientation);if(!space){toast('桌面空间不足，请先缩小或移除一个组件');return;}const widget={id:'widget-'+Date.now(),type,label:W.TYPES[type],...space,w:2,h:1,...(type==='note'?{content:''}:{})};draft.widgets.push(widget);selected=widget.id;editing=true;renderEditor();updatePreview();};
+$('add').onclick=()=>{
+ const type=$('add-widget').value;
+ let width=2,space=W.findSpace(draft.widgets,width,1,draft.orientation);
+ if(!space&&type==='image'){width=1;space=W.findSpace(draft.widgets,width,1,draft.orientation);}
+ if(!space){toast('桌面空间不足，请先缩小或移除一个组件');return;}
+ const widget={id:'widget-'+Date.now(),type,label:W.TYPES[type],...space,w:width,h:1,...(type==='note'?{content:''}:{})};
+ draft.widgets.push(widget);selected=widget.id;editing=true;renderEditor();updatePreview();
+};
 $('widget-label').oninput=()=>{const widget=draft.widgets.find(w=>w.id===selected);if(!widget)return;widget.label=$('widget-label').value;editing=true;updatePreview();};
 $('widget-size').onchange=()=>{const size=$('widget-size').value.split(',').map(Number);try{draft.widgets=W.validate(draft.widgets.map(w=>w.id===selected?{...w,w:size[0],h:size[1]}:w),draft.orientation);editing=true;updatePreview();}catch(error){toast('该大小会重叠或越界，请先腾出空间',true);}renderEditor();};
 $('remove-widget').onclick=()=>{draft.widgets=draft.widgets.filter(w=>w.id!==selected);selected=draft.widgets[0]?.id;editing=true;renderEditor();updatePreview();};
@@ -115,7 +143,7 @@ function tickClock(){const now=new Date();$('clock').replaceChildren(document.cr
 tickClock();setInterval(tickClock,1000);
 for(const id of ['weather-name','latitude','longitude','show-weather'])$(id).addEventListener('input',()=>{editing=true;try{draft.weather=M.sanitize({...draft,weather:{name:$('weather-name').value,latitude:Number($('latitude').value),longitude:Number($('longitude').value),enabled:$('show-weather').checked}}).weather;updatePreview();}catch{}});
 $('search-weather').onclick=()=>action($('search-weather'),async()=>{cityResults=await call('searchWeather',$('city-search').value);if(!cityResults.length){toast('未找到城市，请尝试英文名，或直接输入坐标');return;}$('city-results').replaceChildren(new Option('选择位置',''),...cityResults.map((r,i)=>new Option(r.name,i)));$('city-results').classList.remove('hidden');});
-$('city-results').onchange=()=>{const selected=cityResults[Number($('city-results').value)];if(!selected||$('city-results').value==='')return;draft.weather={...selected,enabled:true};editing=true;fillForms();updatePreview();};
+$('city-results').onchange=()=>{const selected=cityResults[Number($('city-results').value)];if(!selected||$('city-results').value==='')return;draft.weather={...selected,enabled:true};editing=true;fillWeather();updatePreview();};
 
 $('orientation').onchange=()=>{
  const next=$('orientation').value;if(next===draft.orientation)return;
@@ -140,16 +168,75 @@ function renderConnection(){
 $('connection-mode').onchange=()=>{draft.connectionMode=$('connection-mode').value;editing=true;renderConnection();$('device-state').textContent='等待检测连接';$('device-dot').classList.remove('connected');};
 $('font-weight').onchange=()=>{draft.fontWeight=Number($('font-weight').value);editing=true;updatePreview();};
 $('widget-content').oninput=()=>{const widget=draft.widgets.find(w=>w.id===selected);if(widget?.type!=='note')return;widget.content=$('widget-content').value;editing=true;updatePreview();};
+$('widget-image-file').onchange=async event=>{
+ const input=event.target,file=input.files[0];
+ input.value='';
+ if(!file)return;
+ const id=selected,orientation=draft.orientation;
+ try{
+  if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>20*1024*1024)throw new Error('请选择 20 MB 以内的 PNG、JPG 或 WebP 图片');
+  input.disabled=true;
+  const bitmap=await createImageBitmap(file);
+  const canvas=document.createElement('canvas');
+  const scale=Math.min(1,W.IMAGE_MAX_SIDE/Math.max(bitmap.width,bitmap.height));
+  canvas.width=Math.max(1,Math.round(bitmap.width*scale));
+  canvas.height=Math.max(1,Math.round(bitmap.height*scale));
+  const ctx=canvas.getContext('2d',{alpha:false});
+  try{
+   ctx.fillStyle='#fff';
+   ctx.fillRect(0,0,canvas.width,canvas.height);
+   ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);
+  }finally{bitmap.close();}
+  const pixels=ctx.getImageData(0,0,canvas.width,canvas.height);
+  W.mapImage(pixels.data,canvas.width);
+  ctx.putImageData(pixels,0,0);
+  const gray=canvas.toDataURL('image/png');
+  W.mapImage(pixels.data,canvas.width,true);
+  ctx.putImageData(pixels,0,0);
+  const mono=canvas.toDataURL('image/png');
+  const widgets=draft.orientation===orientation?draft.widgets:draft.layouts[orientation];
+  const widget=widgets.find(w=>w.id===id&&w.type==='image');
+  if(!widget)return;
+  widget.image={gray,mono};
+  widget.imageView={...W.IMAGE_VIEW};
+  editing=true;renderEditor();updatePreview();
+ }catch(error){toast('导入图片失败：'+error.message,true);}
+ finally{input.disabled=false;}
+};
+$('widget-image-mode').onchange=()=>{
+ const widget=draft.widgets.find(w=>w.id===selected);
+ if(widget?.type!=='image')return;
+ widget.imageMode=$('widget-image-mode').value;
+ editing=true;updatePreview();
+};
+for(const key of ['fit','zoom','x','y'])$('image-'+key).oninput=event=>{
+ const widget=draft.widgets.find(w=>w.id===selected);
+ if(widget?.type!=='image'||!widget.image)return;
+ const value=event.target.value;
+ widget.imageView={...(widget.imageView??W.IMAGE_VIEW),[key]:key==='fit'?value:Number(value)};
+ $('image-zoom-value').textContent=widget.imageView.zoom+'%';
+ editing=true;updatePreview();
+};
+$('image-reset').onclick=()=>{
+ const widget=draft.widgets.find(w=>w.id===selected);
+ if(widget?.type!=='image'||!widget.image)return;
+ widget.imageView={...W.IMAGE_VIEW};
+ editing=true;renderEditor();updatePreview();
+};
 
 let previewZoom=1,previewFit=true;
 function applyPreviewZoom(){
- if(!draft)return;
+ if(!draft||activeTab==='settings')return;
  const page=W.screen(draft.orientation),viewport=$('preview-viewport');
- const landscape=draft.orientation==='landscape';
- const availW=Math.max(120,viewport.clientWidth-32-(landscape?40:0));
- const availH=Math.max(120,viewport.clientHeight-32-(landscape?0:36));
- if(previewFit)previewZoom=Math.max(.05,Math.min(2,availW/page.width,availH/page.height));
  const preview=$('kindle-preview');
+ if(previewFit){
+  const device=preview.parentElement,stage=getComputedStyle(device.parentElement);
+  const horizontalPadding=parseFloat(stage.paddingLeft)+parseFloat(stage.paddingRight);
+  const verticalPadding=parseFloat(stage.paddingTop)+parseFloat(stage.paddingBottom);
+  const availW=viewport.clientWidth-horizontalPadding-(device.offsetWidth-preview.offsetWidth)-2;
+  const availH=viewport.clientHeight-verticalPadding-(device.offsetHeight-preview.offsetHeight)-2;
+  previewZoom=Math.max(.05,Math.min(2,availW/page.width,availH/page.height));
+ }
  const width=Math.round(page.width*previewZoom),height=Math.round(page.height*previewZoom);
  preview.style.aspectRatio=page.width+' / '+page.height;
  preview.style.width=width+'px';preview.style.height=height+'px';
