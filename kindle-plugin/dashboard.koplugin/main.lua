@@ -17,6 +17,7 @@ local ButtonDialog = require("ui/widget/buttondialog")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local ConfirmBox = require("ui/widget/confirmbox")
 local Device = require("device")
+local Dispatcher = require("dispatcher")
 local Event = require("ui/event")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
@@ -432,12 +433,31 @@ local Dashboard = WidgetContainer:extend{
 
 function Dashboard:init()
     self.ui.menu:registerToMainMenu(self)
+    self:onDispatcherRegisterActions()
+end
+
+function Dashboard:onDispatcherRegisterActions()
+    -- Shows up in 手势管理器 so a swipe can open the dashboard. general=true
+    -- keeps it available in both the file browser and the reader.
+    Dispatcher:registerAction("dashboard_open", {
+        category = "none",
+        event = "OpenDashboard",
+        title = _("看板模式"),
+        general = true,
+    })
+end
+
+function Dashboard:onOpenDashboard()
+    self:open()
+    return true
 end
 
 function Dashboard:addToMainMenu(menu_items)
+    -- "tools" is a top-level tab (阅读计时、Calibre、统计). Orphan items are
+    -- appended there, so this stays out of the nested 更多工具 list.
     menu_items.dashboard = {
         text = _("看板模式"),
-        sorting_hint = "more_tools",
+        sorting_hint = "tools",
         callback = function()
             self:open()
         end,
@@ -447,7 +467,7 @@ function Dashboard:addToMainMenu(menu_items)
     }
     menu_items.dashboard_connection = {
         text = _("连接信息"),
-        sorting_hint = "more_tools",
+        sorting_hint = "tools",
         callback = function()
             self:setShowConnectionInfo(true)
             if not self.widget then
