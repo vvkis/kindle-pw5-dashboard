@@ -2,13 +2,14 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs/promises');
 const path=require('node:path');
-const os=require('node:os');
 const {spawnSync}=require('node:child_process');
 const {enableTemperature}=require('../desktop/sensor-start.cjs');
 const live={elevated:true,sensors:[{id:'/amdcpu/0/temperature/2',name:'Core (Tctl/Tdie)',type:'Temperature',value:47}]};
 
 async function fixture(fn){
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'kindle-sensor-start-'));
+  const out=path.resolve(__dirname,'..','out');
+  await fs.mkdir(out,{recursive:true});
+  const root=await fs.mkdtemp(path.join(out,'kindle-sensor-start-'));
   try{
     for(const relative of ['sensors/SensorHelper.exe','sensors/EnableSensors.ps1','sensors/PawnIO_setup.exe','lhm/LibreHardwareMonitorLib.dll']){
       const file=path.join(root,relative);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'fixture');

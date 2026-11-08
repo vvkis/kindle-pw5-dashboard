@@ -1,6 +1,6 @@
 # Kindle Monitor
 
-Windows 桌面小组件编辑器 + Kindle PW5 电脑状态看板。Electron 桌面应用，不需要 Python 才能运行打包版本。
+Windows 桌面小组件编辑器 + Kindle 电脑状态看板。Electron 桌面应用，不需要 Python 才能运行打包版本。
 
 ## 直接运行
 
@@ -12,23 +12,29 @@ Windows 桌面小组件编辑器 + Kindle PW5 电脑状态看板。Electron 桌�
 - 竖屏采用 4 × 6 网格，横屏采用 6 × 4 网格，两套排版分别保存。时钟、天气、日历、便签、温度仪表、内存条、系统列表、曲线各自有独立设计。
 - 点击「编辑显示」，在右侧预览中拖动小组件；同尺寸可以交换位置，大组件也能与其覆盖范围内的小组件组交换。可改名、缩放、添加、移除，组件不能越界或重叠。也提供方向按钮。
 - 小组件支持 1 × 1、2 × 1、2 × 2、4 × 2；横屏还支持 6 × 1 的全宽组件。桌面满时需先缩小或移除组件。
+- 在右侧预览选中有文字的组件，即可单独调整字体、常规或加粗、以及字号（85%–115%），当场查看效果。可选 Windows 已安装的字体，包括仅为当前用户安装的字体。新安装字体后重启程序即可选择。点击「保存排版」保留修改，推送和导出会使用相同样式。
+- 「设置 → AI 额度与余额」可给同一平台添加多个账号，再到「编辑显示」添加同名组件。可以显示全部、指定平台或指定账号。只显示已配置账号。
+- DeepSeek、OpenRouter 和 xAI API 查询余额，Claude Code 组织账号查询 Token 用量。Codex 通过官方客户端接口查询订阅额度，优先复用本机登录，也能在浏览器授权其他账号。Claude 个人可读取本机近期用量或手动录入。
+- Grok Bot 支持手动录入每周剩余额度和重置时间。
+- 用量查询由电脑直接连接对应平台。API Key 和手动记录保存在 Windows 加密的本机数据中，额外 Codex 登录使用本机系统凭证库。凭证不进入排版文件、发布包或 Kindle 推图。
 - 添加「图片」组件可导入 PNG、JPG、WebP，选择灰阶或纯黑白抖动。在「图片构图」选择完整显示或铺满裁剪，再调整缩放和取景位置。保存排版后，构图会随看板一起推送或导出。
-- 编辑后保存，预览与实际 PNG 共用一份 SVG 排版。竖屏导出 1236 × 1648，横屏导出 1648 × 1236，均为 8-bit 灰阶 L PNG。
+- 编辑后保存，预览与实际 PNG 共用一份 SVG 排版，按所选 Kindle 屏幕和摆放方向导出 8-bit 灰阶 L PNG。
+- 「设置 → 屏幕与显示 → Kindle 屏幕」默认为自动识别。HTTP 读取 KOReader 报告的屏幕尺寸和旋转状态，支持旧插件返回的尺寸。新版插件也会报告机型。USB / Wi-Fi SSH 会尝试读取设备的可见帧缓冲尺寸。无法获取尺寸时，可手选 Kindle、Paperwhite、Voyage、Oasis、Colorsoft、Scribe 等预设，或输入竖屏像素尺寸。
 - 预览区域内直接缩放：点击画面后使用 Ctrl + 滚轮，或上方 − / ＋、适应、100% 控件（10%–200%）。放大后滚动查看，仍能拖动编辑小组件；不改变组件排版或导出尺寸。
-- 墨水屏使用随包内置的 **Maple Mono NF CN**，默认加粗，可在「设置 → 屏幕与显示」选择常规。
+- 看板默认使用本机已安装的 Maple Mono NF CN 或微软雅黑等系统字体。旧排版指定的字体若未安装，会回退到本机默认字体。
 - 选中「文字便签」后可独立编辑备忘录内容，支持换行、最多 2000 字；每个组件和横竖屏排版分别保存。旧便签保留原内容，底部留言仍可单独修改。
 
 ## 横屏摆放
 
 在「设置 → 屏幕与显示 → 摆放方向」中选择横屏。横屏使用独立排版，可以继续拖动、调整大小；切回竖屏会恢复原先的竖屏排版，保存后两套排版都保留。
 
-横放时请选择设备原来的顶部朝向左侧或右侧。预览和导出图片保持正常可读的横屏尺寸。HTTP 推送会读取 KOReader 当前的屏幕方向，再按设备的物理摆放旋转图片。SSH 使用 eips 刷屏时，图片会转为 Kindle 原生 1236 × 1648 像素坐标。左右两种方向均有像素角点和模拟推送测试，真实硬件显示方向仍需设备联调确认。
+横放时请选择设备原来的顶部朝向左侧或右侧。预览和导出图片保持正常可读的横屏尺寸。HTTP 推送读取 KOReader 的当前旋转，再按设备的物理摆放旋转图片。SSH 使用 eips 刷屏时，图片会转为所选屏幕的竖屏尺寸。机型名称参考 [Amazon 机型识别文档](https://digprjsurvey.amazon.com/csad/help/node/GK33S847NN4V6Y83)，自动模式以设备报告的像素为准。实际推送需要机型和固件支持相应的 KOReader 插件或 SSH 环境。
 
 ## 后台省内存
 
 点击窗口右上角「后台省内存」，应用先保存当前设置，再销毁控制面板及其渲染进程。电脑采集、天气更新和已经开启的自动推送继续在后台运行。双击 Windows 托盘图标恢复编辑界面，右键托盘可立即推送、开关自动推送或退出。需要持续同步时，请先打开自动推送；后台按钮不会擅自开启它。普通关闭窗口仍为退出应用。
 
-Maple Mono NF CN 字体和原有横竖屏排版全部保留。PNG 使用临时导出进程，完成后退出以释放字体解析和栅格化内存。默认关闭界面硬件加速，适合当前静态看板；可通过 EXE 的 `--enable-gpu` 参数恢复硬件加速。
+PNG 使用临时导出进程，只加载看板使用的本机字体和备用字体，完成后退出以释放字体解析和栅格化内存。默认关闭界面硬件加速，适合当前静态看板；可通过 EXE 的 `--enable-gpu` 参数恢复硬件加速。
 
 本机实测私有内存：前台约 217 MiB，托盘后台约 101 MiB，原生传感器进程另外约 52 MiB。是分别测量的数据，实际占用随硬件和运行状态变化；瞬时导出会短暂增加一个进程。详见性能文档。
 
@@ -59,7 +65,7 @@ Kindle 需已安装可运行的 KOReader。看板模式通过局域网 HTTP 收�
 ### 通过 Wi-Fi 更新画面
 
 1. 将电脑和 Kindle 连到同一 Wi-Fi，打开 Kindle 的「看板模式」。记下屏幕上的 IPv4、端口（默认 `8686`）和 8 位配对口令。长按菜单中的「看板模式」也可以查看「连接信息」、改端口、改检查间隔或重新生成口令。
-2. Windows 端打开「设置 → Kindle 连接」，选择「看板插件 (HTTP)」，分别填入 IP、端口和口令，点击「检测连接」。若重新生成了口令或换网后 IP 发生变化，在这里更新并检测一次。
+2. Windows 端打开「设置 → Kindle 连接」，选择「看板插件 (HTTP)」，分别填入 IP、端口和口令，保存后左侧会自动显示连接状态。也可点「检测连接」立即检查。若重新生成了口令或换网后 IP 发生变化，在这里更新设置。
 3. 点击「推送到 Kindle」立即更新画面，或在「设置 → 采集与推送」开启自动推送。横放时，在「设置 → 屏幕与显示」选横屏，再选设备原来的顶部朝左或朝右。
 
 等待画面和已推图时的黑字白底连接条都会显示连接信息。点连接条可隐藏，长按看板可重新显示。插件收到 PNG 后先写临时文件，再替换 `/mnt/us/dashboard.png` 并刷新。单张 PNG 最大 8 MB，上传和状态接口都需要口令。
@@ -103,7 +109,7 @@ pnpm build
 pnpm benchmark:memory
 ```
 
-`prepare:assets` 从官方源下载固定版本 LibreHardwareMonitor v0.9.6 和 Maple Mono NF CN v7.9，验证发布资产 SHA256，保留许可证。应用只打包 Regular/Bold 两个字重，字体不安装到系统。运行/打包脚本使用 Windows 现有 .NET Framework 编译器构建轻量传感器宿主；不额外下载 .NET SDK，不再保留常驻 PowerShell 采集进程。
+`prepare:assets` 从官方源下载固定版本 LibreHardwareMonitor v0.9.6，验证发布资产 SHA256，保留许可证。运行/打包脚本使用 Windows 现有 .NET Framework 编译器构建轻量传感器宿主；不额外下载 .NET SDK，不再保留常驻 PowerShell 采集进程。
 
 pnpm store/cache/state 位于 `.pnpm-store/`、`.pnpm-cache/`、`.pnpm-state/`；Electron 运行/构建脚本将二进制缓存固定到 `.electron-cache/`、`.electron-builder-cache/`。不使用 npm，不提交 node_modules、缓存、vendor、dist 或运行时数据。
 
@@ -125,7 +131,7 @@ node scripts/benchmark.cjs 60
 
 `desktop/` 是桌面应用与原生采集器源码，`scripts/` 是资源准备、构建、发布和性能工具，`tests/` 是当前桌面应用测试，`docs/` 是实现与性能说明。旧 Python 演示出图、假数据和 PowerShell 采集器已移除；开发只需 Node.js、pnpm 和 Windows 自带 .NET Framework。
 
-`vendor/`、`node_modules/`、`runtime/`、`out/` 和各类缓存均不提交 Git。资源准备只保留实际使用的 Regular/Bold 字体和必要许可证。打包仅包含中英文 Chromium 语言包；编译源码、构建脚本和图标源文件不进入应用归档。
+`vendor/`、`node_modules/`、`runtime/`、`out/` 和各类缓存均不提交 Git。Windows 发布包不携带字体文件。打包仅包含中英文 Chromium 语言包；编译源码、构建脚本和图标源文件不进入应用归档。
 
 执行 `pnpm release` 生成 Windows ZIP、KOReader 插件 ZIP 和对应的 SHA‑256 文件。Windows ZIP 包含完整可运行程序及许可证。插件 ZIP 只包含 `dashboard.koplugin` 的三个 Lua 文件。发布包排除本机运行数据、日志和备份文件。
 
@@ -135,5 +141,4 @@ node scripts/benchmark.cjs 60
 
 - [Electron 安全与隔离](https://www.electronjs.org/docs/latest/tutorial/security)：contextIsolation、sandbox、受限 preload、IPC 来源验证与 CSP。
 - [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)：采集库；许可证及第三方声明随应用资源分发。
-- [Maple Mono](https://github.com/subframe7536/maple-font)：字体；SIL OFL 许可证随字体分发。
 - [Open-Meteo](https://open-meteo.com/en/docs)：天气预报；界面/组件注明数据来源。

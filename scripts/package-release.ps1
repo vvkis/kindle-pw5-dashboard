@@ -3,6 +3,9 @@ param([string]$Application)
 $ErrorActionPreference='Stop'
 $env:PSModulePath="$env:WINDIR\System32\WindowsPowerShell\v1.0\Modules;$env:ProgramFiles\WindowsPowerShell\Modules;$env:PSModulePath"
 $root=Split-Path -Parent $PSScriptRoot
+$env:TEMP=Join-Path $root 'out/tmp'
+$env:TMP=$env:TEMP
+New-Item -ItemType Directory -Path $env:TEMP -Force | Out-Null
 $package=Get-Content -LiteralPath (Join-Path $root 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 if (!$Application) { $Application=Join-Path $root 'dist/release/win-unpacked' }
 $application=(Resolve-Path -LiteralPath $Application).Path
@@ -15,7 +18,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip=[IO.Compression.ZipFile]::OpenRead($archive)
 try{
     $bad=@($zip.Entries | Where-Object {
-        $_.FullName -match '(^|[\\/])(Kindle Monitor Data|settings\.json)([\\/]|$)|\.(bak|tmp|log)$'
+        $_.FullName -match '(^|[\\/])(Kindle Monitor Data|settings\.json|ai-usage\.bin|ai-codex|tests?|smoke-[^\\/]+|[^\\/]+\.before-[^\\/]*)([\\/]|$)|\.(bak|tmp|log|ttf|otf|ttc)$'
     })
     if($bad.Count){throw 'Release contains local data.'}
     if(!($zip.Entries | Where-Object {$_.FullName -eq 'Kindle Monitor.exe'})){throw 'Release executable missing.'}

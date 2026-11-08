@@ -1,7 +1,15 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory();else root.DesktopWidgets=factory();})(typeof globalThis==='object'?globalThis:this,function(){
- const TYPES={calendar:'日历',clock:'时间与日期',weather:'天气',cpuTemp:'CPU 温度',gpuTemp:'GPU 温度',cpuLoad:'CPU 占用',gpuLoad:'显卡占用',memoryLoad:'内存占用',gpuMemoryLoad:'显存占用',memoryUsed:'已用内存',gpuPower:'显卡功耗',system:'系统概览',trend:'温度趋势',note:'文字便签',image:'图片'};
+ const TYPES={calendar:'日历',clock:'时间与日期',weather:'天气',cpuTemp:'CPU 温度',gpuTemp:'GPU 温度',cpuLoad:'CPU 占用',gpuLoad:'显卡占用',memoryLoad:'内存占用',gpuMemoryLoad:'显存占用',memoryUsed:'已用内存',gpuPower:'显卡功耗',system:'系统概览',trend:'温度趋势',note:'文字便签',image:'图片',usage:'AI 额度与余额'};
  const IMAGE_MAX_SIDE=768;
  const IMAGE_VIEW=Object.freeze({fit:'contain',zoom:100,x:0,y:0});
+ const LEGACY_FONTS=new Map([['maple','Maple Mono NF CN'],['yahei','Microsoft YaHei'],['dengxian','DengXian']]);
+ const CJK_FONTS=['Maple Mono NF CN','Microsoft YaHei','DengXian','SimSun','Microsoft JhengHei','Yu Gothic'];
+ const FALLBACK_FONTS=[...CJK_FONTS.slice(1),'Segoe UI'];
+ const FONT_SCALE={min:85,max:115,default:100};
+ function fallbackFonts(availableFonts){
+  const chinese=CJK_FONTS.find(family=>availableFonts.includes(family));
+  return [chinese,'Segoe UI'].filter(family=>availableFonts.includes(family));
+ }
  const BAYER=[0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5];
  function mapImage(data,width,mono=false){
   for(let i=0;i<data.length;i+=4){
@@ -26,8 +34,49 @@
   return {width,height};
  }
  const GRID={columns:4,rows:6,x:64,y:134,width:1108,height:1356,gap:20};
- function screen(orientation='portrait'){
-  return orientation==='landscape'?{width:1648,height:1236,grid:{columns:6,rows:4,x:64,y:118,width:1520,height:972,gap:20}}:{width:1236,height:1648,grid:GRID};
+ const LANDSCAPE_GRID={columns:6,rows:4,x:64,y:118,width:1520,height:972,gap:20};
+ const DISPLAYS={
+  basic:{name:'Kindle 基础款（2019 及部分旧款）',short:'Kindle',width:600,height:800,models:['KindleBasic','KindleBasic2','KindleBasic3','KindleTouch']},
+  pw12:{name:'Kindle Paperwhite 1 / 2',short:'PW1/2',width:758,height:1024,models:['KindlePaperWhite','KindlePaperWhite2']},
+  basicHD:{name:'Kindle 基础款（2022 / 2024）',short:'Kindle',width:1072,height:1448,models:['KindleBasic4','KindleBasic5']},
+  pw34:{name:'Kindle Paperwhite 3 / 4',short:'PW3/4',width:1072,height:1448,models:['KindlePaperWhite3','KindlePaperWhite4']},
+  voyage:{name:'Kindle Voyage',short:'Voyage',width:1072,height:1448,models:['KindleVoyage']},
+  oasis1:{name:'Kindle Oasis 1',short:'Oasis',width:1072,height:1448,models:['KindleOasis']},
+  oasis23:{name:'Kindle Oasis 2 / 3',short:'Oasis',width:1264,height:1680,models:['KindleOasis2','KindleOasis3']},
+  pw5:{name:'Kindle Paperwhite 5',short:'PW5',width:1236,height:1648,models:['KindlePaperWhite5','KindlePaperWhite5SE']},
+  pw6:{name:'Kindle Paperwhite 6（2024）',short:'PW6',width:1264,height:1680,models:['KindlePaperWhite6']},
+  colorsoft:{name:'Kindle Colorsoft（7 英寸）',short:'Kindle',width:1264,height:1680,models:['KindleColorSoft']},
+  scribe:{name:'Kindle Scribe（10.2 英寸）',short:'Scribe',width:1860,height:2480,models:['KindleScribe']},
+  scribe11:{name:'Kindle Scribe（11 英寸）',short:'Scribe',width:1980,height:2640,models:['KindleScribe3']},
+  scribeColorsoft:{name:'Kindle Scribe Colorsoft',short:'Scribe',width:1980,height:2640,models:['KindleScribeColorSoft']},
+ };
+ function displaySize(width,height){
+  if(![width,height].every(side=>Number.isInteger(side)&&side>=300&&side<=4096)||width*height>8_000_000)return null;
+  return {width:Math.min(width,height),height:Math.max(width,height)};
+ }
+ function displayFor(config,detected){
+  const key=config.displayProfile??'auto';
+  if(key==='auto'&&detected){
+   const size=displaySize(detected.width,detected.height);
+   if(size){
+    const profile=Object.values(DISPLAYS).find(item=>item.models.includes(detected.model));
+    return {...size,name:profile?.name??'Kindle',short:profile?.short??'Kindle',detected:true};
+   }
+  }
+  if(key==='custom'){
+   const size=displaySize(config.displayWidth,config.displayHeight);
+   if(size)return {...size,name:'自定义 Kindle',short:'Kindle'};
+  }
+  return (Object.hasOwn(DISPLAYS,key)?DISPLAYS[key]:DISPLAYS.pw5);
+ }
+ function screen(orientation='portrait',display=DISPLAYS.pw5){
+  const landscape=orientation==='landscape';
+  const {width:designWidth,height:designHeight}=landscape?{width:1648,height:1236}:DISPLAYS.pw5;
+  const width=landscape?display.height:display.width,height=landscape?display.width:display.height;
+  const scale=Math.min(width/designWidth,height/designHeight);
+  const boxWidth=width/scale,boxHeight=height/scale;
+  const viewBox={x:(designWidth-boxWidth)/2,y:(designHeight-boxHeight)/2,width:boxWidth,height:boxHeight};
+  return {width,height,designWidth,designHeight,viewBox,grid:landscape?LANDSCAPE_GRID:GRID};
  }
  const defaults=(orientation='portrait')=>orientation==='landscape'?[
   {id:'clock',type:'clock',label:'时间与日期',x:0,y:0,w:2,h:2},
@@ -62,12 +111,29 @@
    if(w.x<0||w.y<0||w.w<1||w.h<1||w.x+w.w>grid.columns||w.y+w.h>grid.rows)throw new Error('组件超出桌面范围');
    const out={id:w.id,type:w.type,label:String(w.label||TYPES[w.type]).slice(0,20),x:w.x,y:w.y,w:w.w,h:w.h};
    if(w.type==='note'&&w.content!==undefined)out.content=String(w.content).replace(/\r\n?/g,'\n').replace(/[\x00-\x09\x0b-\x1f]/g,' ').slice(0,2000);
+   if(w.type==='usage'&&w.usageSource!==undefined){
+    if(typeof w.usageSource!=='string'||!/^(?:[a-zA-Z]{1,20}|[0-9a-f-]{36})$/.test(w.usageSource))throw new Error('用量来源无效');
+    out.usageSource=w.usageSource;
+   }
    if(w.type==='image'){
     out.imageMode=w.imageMode==='mono'?'mono':'gray';
     if(w.image!==undefined)out.image={gray:imageData(w.image?.gray),mono:imageData(w.image?.mono)};
     const {fit,zoom,x,y}={...IMAGE_VIEW,...w.imageView};
     if(!['contain','cover'].includes(fit)||!Number.isInteger(zoom)||zoom<25||zoom>400||![x,y].every(value=>Number.isInteger(value)&&Math.abs(value)<=100))throw new Error('图片缩放或裁剪设置无效');
     out.imageView={fit,zoom,x,y};
+   }else{
+    if(w.fontFamily!==undefined){
+     if(typeof w.fontFamily!=='string'||!w.fontFamily.trim()||w.fontFamily.length>128||/[,;"'\x00-\x1f]/.test(w.fontFamily))throw new Error('无效的组件字体');
+     out.fontFamily=LEGACY_FONTS.get(w.fontFamily)??w.fontFamily;
+    }
+    if(w.fontWeight!==undefined){
+     if(![400,700].includes(w.fontWeight))throw new Error('无效的组件字体粗细');
+     out.fontWeight=w.fontWeight;
+    }
+    if(w.fontScale!==undefined){
+     if(!Number.isInteger(w.fontScale)||w.fontScale<FONT_SCALE.min||w.fontScale>FONT_SCALE.max)throw new Error('无效的组件字号');
+     out.fontScale=w.fontScale;
+    }
    }
    return out;
   });
@@ -87,7 +153,7 @@
  function findSpace(widgets,w,h,orientation='portrait'){const grid=screen(orientation).grid;for(let y=0;y<=grid.rows-h;y++)for(let x=0;x<=grid.columns-w;x++)if(!widgets.some(a=>intersects(a,{x,y,w,h})))return{x,y};return null;}
  const esc=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
  const fmt=v=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(v>=100?0:1).replace(/\.0$/,''):'—';
- function text(x,y,value,size=24,extra='',maxWidth=1108){
+ function svgText(x,y,value,size,extra,maxWidth){
   let str=String(value);const width=s=>Array.from(s).reduce((n,c)=>n+(c.charCodeAt(0)>255?1:.6),0)*size;
   if(width(str)>maxWidth){while(str&&width(str+'…')>maxWidth)str=str.slice(0,-1);str+='…';}
   return `<text x="${x}" y="${y}" font-size="${size}" ${extra}>${esc(str)}</text>`;
@@ -107,27 +173,39 @@
    ?`<circle cx="${points[0][0]}" cy="${points[0][1]}" r="3" fill="currentColor"/>`
    :`<polyline points="${points.join(' ')}" fill="none" stroke="currentColor" stroke-width="3"/>`).join('');
  }
- function svg(config,sample,history=[],weather=null){
-  const page=screen(config.orientation);
+ function svg(config,sample,history=[],weather=null,availableFonts=FALLBACK_FONTS,detected){
+  const display=displayFor(config,detected);
+  const page=screen(config.orientation,display),{designWidth,designHeight,viewBox}=page;
   const at=new Date(sample?.at||Date.now()),values=sample?.values||{},week=['日','一','二','三','四','五','六'][at.getDay()];
   const englishDay=['SUNDAY','MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY'][at.getDay()];
   const rounded=(x,y,w,h,fill='#fff',stroke='none',radius=22)=>`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${radius}" fill="${fill}" stroke="${stroke}" stroke-width="2"/>`;
   const rule=(x,y,w,color='#c6c6c6')=>`<path d="M${x} ${y}h${w}" stroke="${color}" fill="none"/>`;
   const sun=(x,y,r,color='#fff')=>{let out=`<circle cx="${x}" cy="${y}" r="${r*.43}" fill="none" stroke="${color}" stroke-width="3"/>`;for(let i=0;i<8;i++){const a=i*Math.PI/4;out+=`<path d="M${x+Math.cos(a)*r*.7} ${y+Math.sin(a)*r*.7}L${x+Math.cos(a)*r} ${y+Math.sin(a)*r}" stroke="${color}" stroke-width="3" stroke-linecap="round"/>`;}return out;};
-  let body=`<rect width="${page.width}" height="${page.height}" fill="#fff"/><g fill="#161616" font-family="Maple Mono NF CN,monospace" font-weight="${config.fontWeight===400?400:700}">`;
-  body+=text(64,76,config.title,25,'',850)+text(page.width-256,76,'DESK / 01',18);
+  const defaultWeight=config.fontWeight===400?400:700;
+  const text=(x,y,value,size=24,extra='',maxWidth=1108)=>svgText(x,y,value,size,extra,maxWidth);
+  const fallback=[...fallbackFonts(availableFonts),'sans-serif'];
+  let body=`<rect x="${viewBox.x}" y="${viewBox.y}" width="${viewBox.width}" height="${viewBox.height}" fill="#fff"/><g fill="#161616" font-family="${fallback.join(',')}" font-weight="${defaultWeight}">`;
+  body+=text(64,76,config.title,25,'',850)+text(designWidth-256,76,'DESK / 01',18);
   for(const widget of validate(config.widgets||defaults(config.orientation),config.orientation)){
+   const usageRows=widget.type==='usage'?(sample?.usage??[]).filter(row=>!widget.usageSource||row.provider===widget.usageSource||row.id===widget.usageSource):null;
+   if(usageRows&&!usageRows.length)continue;
+   const family=availableFonts.includes(widget.fontFamily)?[...new Set([widget.fontFamily,...fallback])]:fallback;
+   const fontScale=(widget.fontScale??FONT_SCALE.default)/100;
+   const weight=widget.fontWeight??defaultWeight;
+   const text=(x,y,value,size=24,extra='',maxWidth=1108)=>svgText(x,y,value,Math.round(size*fontScale),extra,maxWidth);
+   const valueWeight=widget.fontWeight===undefined?'font-weight="700"':'';
+   body+=`<g data-widget="${widget.id}" font-family="${esc(family.join(','))}" font-weight="${weight}">`;
    const r=rect(widget,config.orientation),x=r.x,y=r.y,w=r.width,h=r.height,compact=h<260,narrow=w<400,pad=narrow?20:30;
    if(widget.type==='clock'){
     body+=text(x+8,y+45,englishDay,23,'letter-spacing="3"',w-20);
     if(!narrow){const cx=x+w-55,cy=y+34,rad=25;const ah=(at.getHours()%12+at.getMinutes()/60)*Math.PI/6-Math.PI/2,am=at.getMinutes()*Math.PI/30-Math.PI/2;body+=`<circle cx="${cx}" cy="${cy}" r="${rad}" stroke="#111" fill="none" stroke-width="2"/><path d="M${cx+Math.cos(ah)*15} ${cy+Math.sin(ah)*15}L${cx} ${cy}L${cx+Math.cos(am)*20} ${cy+Math.sin(am)*20}" fill="none" stroke="#111" stroke-width="3" stroke-linecap="round"/>`;}
-    body+=text(x+2,y+h*(compact?.72:.56),at.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false}),narrow?62:120,'font-weight="bold"',w-10);
+    body+=text(x+2,y+h*(compact?.72:.56),at.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false}),narrow?62:120,valueWeight,w-10);
     if(!compact){body+=rule(x+8,y+h-112,w-22,'#222');body+=text(x+8,y+h-64,`${at.getFullYear()} / ${String(at.getMonth()+1).padStart(2,'0')} / ${String(at.getDate()).padStart(2,'0')}`,26);body+=text(x+8,y+h-20,'星期'+week+'  ·  今天也从容一点',21,'',w-20);}
    }else if(widget.type==='weather'){
     body+=rounded(x,y,w,h,'#191919');body+='<g fill="#fff">';
     body+=text(x+pad,y+38,config.weather.name,narrow?17:21,'',w-pad*2);
     const active=config.weather.enabled!==false&&weather;
-    body+=text(x+pad,y+h*(compact?.66:.53),active?`${fmt(weather.temperature)}°`:'—',narrow?56:78,'font-weight="bold"',w-pad*2);
+    body+=text(x+pad,y+h*(compact?.66:.53),active?`${fmt(weather.temperature)}°`:'—',narrow?56:78,valueWeight,w-pad*2);
     const label=active?`${weather.condition}  ${fmt(weather.low)}° / ${fmt(weather.high)}°`:'等待天气更新';
     body+=text(x+pad,y+h-24,label,narrow?16:21,'',w-pad*2);
     if(!narrow){body+=sun(x+w-75,y+h*.49,30);if(active&&weather.code>=1)body+=`<path d="M${x+w-104} ${y+h*.6}c-20 0-22-30-1-34 5-22 37-20 42 0 21 0 24 34 0 34Z" fill="#191919" stroke="#fff" stroke-width="3"/>`;}
@@ -137,7 +215,7 @@
     body+=rounded(x,y,w,h,'#f3f3f3','none',8);
     body+=`<rect x="${x}" y="${y}" width="${w}" height="42" rx="8" fill="#ddd"/>`;
     body+=text(x+w/2,y+29,(at.getMonth()+1)+'月',18,'text-anchor="middle"');
-    body+=text(x+w/2,y+h*.73,at.getDate(),compact?86:112,'font-weight="bold" text-anchor="middle"');
+    body+=text(x+w/2,y+h*.73,at.getDate(),compact?86:112,`text-anchor="middle" ${valueWeight}`);
     body+=text(x+w/2,y+h-18,'星期'+week,17,'text-anchor="middle"');
    }else if(widget.type==='image'){
     if(widget.image){
@@ -152,10 +230,27 @@
     }else{
      body+=rounded(x,y,w,h,'#f7f7f7','#ddd')+text(x+w/2,y+h/2,'请选择图片',24,'text-anchor="middle"',w-24);
     }
+   }else if(widget.type==='usage'){
+    body+=rounded(x,y,w,h,'#f7f7f7')+text(x+pad,y+39,widget.label,22,'',w-pad*2);
+    const lineHeight=narrow?60:50,capacity=Math.max(1,Math.floor((h-50)/lineHeight));
+    const visible=usageRows.length>capacity?Math.max(1,capacity-1):capacity;
+    usageRows.slice(0,visible).forEach((row,index)=>{
+     const baseline=y+75+index*lineHeight;
+     if(narrow){
+      body+=text(x+pad,baseline,row.name,17,'',w-pad*2);
+      body+=text(x+pad,baseline+23,row.value,20,valueWeight,w-pad*2);
+     }else{
+      const split=w*.43;
+      body+=text(x+pad,baseline,row.name,19,'',split-pad-6);
+      body+=text(x+w-pad,baseline,row.value,21,`text-anchor="end" ${valueWeight}`,w-split-pad);
+      body+=text(x+pad,baseline+20,row.detail,13,'',w-pad*2);
+     }
+    });
+    if(usageRows.length>visible)body+=text(x+pad,y+h-17,`另有 ${usageRows.length-visible} 项`,15,'',w-pad*2);
    }else if(widget.type==='note'){
     body+=`<path d="M${x} ${y}h${w-30}l30 30v${h-30}H${x}Z" fill="#fafafa" stroke="#b9b9b9" stroke-width="1.5"/><path d="M${x+w-30} ${y}v30h30" fill="none" stroke="#b9b9b9"/>`;
     body+=text(x+pad,y+35,widget.label,18,'',w-pad*2);
-    const chars=Math.max(3,Math.floor((w-pad*2)/23)),paragraphs=(widget.content??config.note??'').split('\n'),lines=[];
+    const chars=Math.max(3,Math.floor((w-pad*2)/(23*fontScale))),paragraphs=(widget.content??config.note??'').split('\n'),lines=[];
     for(const paragraph of paragraphs){const letters=Array.from(paragraph);if(!letters.length)lines.push('');while(letters.length)lines.push(letters.splice(0,chars).join(''));}
     for(let i=0;i<Math.min(Math.floor((h-70)/35),lines.length);i++){body+=text(x+pad,y+83+i*35,lines[i],22,'',w-pad*2);body+=rule(x+pad,y+91+i*35,w-pad*2,'#dedede');}
    }else if(widget.type==='cpuTemp'&&!compact){
@@ -164,17 +259,17 @@
     const arc=(start,end)=>{const point=a=>[cx+radius*Math.cos(a),cy+radius*Math.sin(a)];const a=point(start),b=point(end);return `M${a[0]} ${a[1]}A${radius} ${radius} 0 ${end-start>Math.PI?1:0} 1 ${b[0]} ${b[1]}`;};
     body+=`<path d="${arc(Math.PI*.75,Math.PI*2.25)}" fill="none" stroke="#dedede" stroke-width="13" stroke-linecap="round"/>`;
     if(value!=null)body+=`<path d="${arc(Math.PI*.75,Math.PI*.75+Math.max(.01,Math.min(1,value/100))*Math.PI*1.5)}" fill="none" stroke="#111" stroke-width="13" stroke-linecap="round"/>`;
-    body+=text(cx,cy+13,fmt(value),narrow?56:80,'font-weight="bold" text-anchor="middle"');body+=text(cx,cy+53,'°C',24,'text-anchor="middle"');
+    body+=text(cx,cy+13,fmt(value),narrow?56:80,`text-anchor="middle" ${valueWeight}`);body+=text(cx,cy+53,'°C',24,'text-anchor="middle"');
     body+=text(cx,y+h-28,value==null?'等待传感器授权':'CPU PACKAGE / 实时',19,'text-anchor="middle"',w-pad*2);
    }else if(widget.type==='gpuTemp'){
     body+=rounded(x,y,w,h,'#fff','#333');const chipX=x+pad+4,chipY=y+(compact?75:h*.42);
     body+=`<rect x="${chipX}" y="${chipY}" width="45" height="45" rx="5" fill="none" stroke="#111" stroke-width="3"/>`;
     for(let i=1;i<4;i++)body+=`<path d="M${chipX+i*11} ${chipY-8}v8M${chipX+i*11} ${chipY+45}v8M${chipX-8} ${chipY+i*11}h8M${chipX+45} ${chipY+i*11}h8" stroke="#111" stroke-width="2"/>`;
     body+=text(x+pad,y+39,widget.label,21,'',w-pad*2);
-    body+=text(x+pad+(narrow?0:85),y+h*(compact?.7:.6),`${fmt(values.gpuTemp)}${values.gpuTemp==null?'':'°C'}`,narrow?46:65,'font-weight="bold"',w-pad*2-(narrow?0:85));
+    body+=text(x+pad+(narrow?0:85),y+h*(compact?.7:.6),`${fmt(values.gpuTemp)}${values.gpuTemp==null?'':'°C'}`,narrow?46:65,valueWeight,w-pad*2-(narrow?0:85));
     body+=text(x+pad,y+h-22,values.gpuTemp==null?'等待显卡传感器':`GPU LOAD  ${fmt(values.gpuLoad)}%`,17,'',w-pad*2);
    }else if(widget.type==='memoryLoad'||widget.type==='gpuMemoryLoad'){
-    body+=text(x+pad,y+36,widget.label,21,'',w-pad*2)+text(x+w-pad,y+94,`${fmt(values[widget.type])}${values[widget.type]==null?'':'%'}`,compact?48:70,'font-weight="bold" text-anchor="end"',w-pad*2);
+    body+=text(x+pad,y+36,widget.label,21,'',w-pad*2)+text(x+w-pad,y+94,`${fmt(values[widget.type])}${values[widget.type]==null?'':'%'}`,compact?48:70,`text-anchor="end" ${valueWeight}`,w-pad*2);
     const count=narrow?10:20,gap=6,bw=(w-pad*2-(count-1)*gap)/count,active=Math.round((values[widget.type]||0)/100*count);
     for(let i=0;i<count;i++)body+=rounded(x+pad+i*(bw+gap),y+h-66,bw,25,i<active?'#222':'#e6e6e6','none',3);
     body+=text(x+pad,y+h-18,widget.type==='memoryLoad'?`已用 ${fmt(values.memoryUsed)} GB`:'VIDEO MEMORY',17,'',w-pad*2);
@@ -190,7 +285,7 @@
      const reading=values[key];
      body+=`<path d="M${left} ${y+64}h22" stroke="${color}" stroke-width="3"${dash}/>`;
      body+=text(left+29,y+69,label,17,'',half-29);
-     body+=text(left,y+102,reading==null?'—':`${fmt(reading)}°C`,narrow?24:34,'font-weight="bold"',half-4);
+     body+=text(left,y+102,reading==null?'—':`${fmt(reading)}°C`,narrow?24:34,valueWeight,half-4);
     }
     const cy=y+(compact?105:135),ch=h-(compact?145:190);
     for(let i=0;i<4;i++)body+=rule(x+pad,cy+i/3*ch,w-pad*2,'#ddd');
@@ -199,13 +294,14 @@
     body+=text(x+pad,y+h-22,'最近 3 分钟',narrow?13:16,'',w-pad*2);
    }else{
     const value=values[widget.type],unit=/Temp/.test(widget.type)?'°C':widget.type==='memoryUsed'?'GB':widget.type==='gpuPower'?'W':'%';
-    body+=rounded(x,y,w,h,'#f7f7f7')+text(x+pad,y+40,widget.label,21,'',w-pad*2)+text(x+pad,y+h*.68,`${fmt(value)}${value==null?'':unit}`,narrow?44:66,'font-weight="bold"',w-pad*2);
+    body+=rounded(x,y,w,h,'#f7f7f7')+text(x+pad,y+40,widget.label,21,'',w-pad*2)+text(x+pad,y+h*.68,`${fmt(value)}${value==null?'':unit}`,narrow?44:66,valueWeight,w-pad*2);
    }
+   body+='</g>';
   }
-  body+=text(64,page.height-103,config.note,20,'',page.width-386);
-  body+=`<path d="M64 ${page.height-76}H${page.width-64}" stroke="#222" stroke-width="2"/>`;
-  body+=text(64,page.height-37,`更新于 ${at.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false})}`,18,'',page.width-536)+text(page.width-436,page.height-37,'天气 / Open-Meteo',14)+text(page.width-158,page.height-37,'PW5',18);
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${page.width}" height="${page.height}" viewBox="0 0 ${page.width} ${page.height}">${body}</g></svg>`;
+  body+=text(64,designHeight-103,config.note,20,'',designWidth-386);
+  body+=`<path d="M64 ${designHeight-76}H${designWidth-64}" stroke="#222" stroke-width="2"/>`;
+  body+=text(64,designHeight-37,`更新于 ${at.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false})}`,18,'',designWidth-536)+text(designWidth-436,designHeight-37,'天气 / Open-Meteo',14)+text(designWidth-158,designHeight-37,display.short,18);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${page.width}" height="${page.height}" viewBox="${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}">${body}</g></svg>`;
  }
- return{TYPES,GRID,IMAGE_MAX_SIDE,IMAGE_VIEW,mapImage,screen,defaults,validate,rect,move,findSpace,svg};
+ return{TYPES,FONT_SCALE,fallbackFonts,GRID,IMAGE_MAX_SIDE,IMAGE_VIEW,mapImage,DISPLAYS,displaySize,displayFor,screen,defaults,validate,rect,move,findSpace,svg};
 });

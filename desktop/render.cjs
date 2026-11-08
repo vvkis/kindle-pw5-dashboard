@@ -1,15 +1,20 @@
 const fs=require('node:fs/promises');
-const path=require('node:path');
 const {Resvg}=require('@resvg/resvg-js');
 const {PNG}=require('pngjs');
 const Model=require('./model.cjs');
 const Widgets=require('./widgets.cjs');
-async function renderPng(config,sample,history,fontsDir,target,weather=null){
+const {systemFonts}=require('./fonts.cjs');
+async function renderPng(config,sample,history,target,weather=null,fonts,device){
   if(!sample)throw new Error('请等待第一轮传感器采样');
-  const svg=Model.dashboardSvg(config,sample,history,weather);
-  const image=new Resvg(svg,{font:{fontFiles:[path.join(fontsDir,'MapleMono-NF-CN-Regular.ttf'),path.join(fontsDir,'MapleMono-NF-CN-Bold.ttf')],loadSystemFonts:false,defaultFontFamily:'Maple Mono NF CN'}}).render().asPng();
+  const clean=Model.sanitize(config);
+  const installed=new Map((fonts??await systemFonts()).map(font=>[font.name,font.files]));
+  const available=[...installed.keys()],fallback=Widgets.fallbackFonts(available);
+  const families=new Set([...fallback,...clean.widgets.map(widget=>widget.fontFamily)]);
+  const fontFiles=[...new Set([...families].flatMap(family=>installed.get(family)??[]))];
+  const svg=Widgets.svg(clean,sample,history,weather,available,device);
+  const image=new Resvg(svg,{font:{fontFiles,loadSystemFonts:!fontFiles.length,defaultFontFamily:fallback[0]??'sans-serif'}}).render().asPng();
   const decoded=PNG.sync.read(image);
-  const page=Widgets.screen(config.orientation);
+  const page=Widgets.screen(clean.orientation,Widgets.displayFor(clean,device));
   if(decoded.width!==page.width||decoded.height!==page.height)throw new Error('导出画布尺寸异常');
   const output=PNG.sync.write(decoded,{colorType:0,inputColorType:6,bitDepth:8});
   if(output[25]!==0)throw new Error('灰阶编码失败');

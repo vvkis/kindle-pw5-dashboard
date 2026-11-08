@@ -1,9 +1,9 @@
 {
   "name": "kindle-monitor",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "packageManager": "pnpm@10.20.0",
-    "description": "Editable PC hardware monitor for Kindle PW5 via the KOReader dashboard plugin or SSH",
+  "description": "Editable PC hardware monitor for Kindle via the KOReader dashboard plugin or SSH",
   "author": "vvkis",
   "main": "desktop/main.cjs",
   "scripts": {
@@ -32,6 +32,9 @@
   "build": {
     "appId": "dev.vvkis.kindle-monitor",
     "productName": "Kindle Monitor",
+    "electronDownload": {
+      "cache": ".electron-cache"
+    },
     "directories": {
       "output": "dist"
     },
@@ -55,15 +58,6 @@
           "LICENSE*",
           "THIRD-PARTY*",
           "SOURCE.txt"
-        ]
-      },
-      {
-        "from": "vendor/fonts",
-        "to": "fonts",
-        "filter": [
-          "MapleMono-NF-CN-Regular.ttf",
-          "MapleMono-NF-CN-Bold.ttf",
-          "LICENSE.txt"
         ]
       },
       {

@@ -44,7 +44,7 @@ local lfs = require("libs/libkoreader-lfs")
 
 local WEEKDAYS = { "星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六" }
 local FULL_REFRESH_EVERY = 10
--- Kindle PW5 paints close to the bezel. Keep content at least this far from every edge.
+-- Keep controls away from the bezel on different panel sizes.
 local SAFE_MARGIN = 50
 
 local function commandOk(cmd)
@@ -795,10 +795,11 @@ function Dashboard:_statusJson()
             rotation = Screen:getRotationMode() or 0
         end
     end)
+    local model = type(Device.model) == "string" and Device.model:match("^[%w_-]+$") or ""
     local orientation = width > height and "landscape" or "portrait"
     return string.format(
-        '{"ok":true,"version":"%s","width":%d,"height":%d,"orientation":"%s","rotation":%d}',
-        protocol.VERSION, width, height, orientation, rotation)
+        '{"ok":true,"version":"%s","width":%d,"height":%d,"orientation":"%s","rotation":%d,"model":"%s"}',
+        protocol.VERSION, width, height, orientation, rotation, model)
 end
 
 function Dashboard:_authorized(headers)

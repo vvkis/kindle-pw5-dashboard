@@ -1,10 +1,10 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self' asset:; img-src 'self' data:;"><title>Kindle Monitor</title><link rel="stylesheet" href="style.css"></head><body>
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:;"><title>Kindle Monitor</title><link rel="stylesheet" href="style.css"></head><body>
 <aside class="sidebar">
  <div class="brand"><div class="brand-icon">▤</div><div>Kindle<span>MONITOR</span></div></div>
  <div class="workspace">我的工作空间</div>
  <nav><button class="nav active" data-tab="overview"><span>◉</span>监控看板</button><button class="nav" data-tab="editor"><span>▦</span>编辑显示</button><button class="nav" data-tab="settings"><span>⚙</span>设置</button></nav>
- <div class="sidebar-note"><div class="tiny-label">CONNECTED DISPLAY</div><strong>Kindle Paperwhite 5</strong><span id="device-resolution">1236 × 1648 · 灰阶墨水屏</span><div class="device-status"><i id="device-dot"></i><span id="device-state">等待连接</span></div></div>
- <button class="text-button data-folder" id="open-data">↗ 打开本地数据</button><div class="version">Kindle Monitor / v0.4.0</div>
+ <div class="sidebar-note"><div class="tiny-label">CONNECTED DISPLAY</div><strong id="device-name">Kindle</strong><span id="device-resolution">灰阶墨水屏</span><div class="device-status"><i id="device-dot"></i><span id="device-state" role="status">等待检测</span></div></div>
+ <button class="text-button data-folder" id="open-data">↗ 打开本地数据</button><div class="version">Kindle Monitor / v0.4.1</div>
 </aside>
 <main>
  <header><div class="breadcrumb">工作空间 <span>/</span> <b id="page-name">监控看板</b></div><div class="live-badge"><i></i>本机实时采集 <span id="sample-cadence">3s</span></div></header>
@@ -28,13 +28,21 @@
  <label>横向取景（左 ↔ 右）<input id="image-x" type="range" min="-100" max="100" step="1" value="0"></label>
  <label>纵向取景（上 ↔ 下）<input id="image-y" type="range" min="-100" max="100" step="1" value="0"></label>
  <button class="button secondary small" id="image-reset" type="button">重置构图</button>
-</fieldset><label>组件大小<select id="widget-size"><option value="1,1">小 · 1 × 1</option><option value="2,1">中 · 2 × 1</option><option value="2,2">大 · 2 × 2</option><option value="4,2">宽 · 4 × 2</option><option value="6,1">横屏全宽 · 6 × 1</option></select></label><div class="field-row widget-arrows"><button class="button secondary small" id="move-left">←</button><button class="button secondary small" id="move-up">↑</button><button class="button secondary small" id="move-down">↓</button><button class="button secondary small" id="move-right">→</button><button class="button secondary small" id="remove-widget">移除</button></div></div>
+</fieldset>
+    <label id="widget-usage-field" class="hidden">显示平台<select id="widget-usage-source"><option value="">所有已配置平台</option></select><span class="help">在「设置 → AI 额度与余额」配置来源。</span></label>
+    <label>组件大小<select id="widget-size"><option value="1,1">小 · 1 × 1</option><option value="2,1">中 · 2 × 1</option><option value="2,2">大 · 2 × 2</option><option value="4,2">宽 · 4 × 2</option><option value="6,1">横屏全宽 · 6 × 1</option></select></label><div class="field-row widget-arrows"><button class="button secondary small" id="move-left">←</button><button class="button secondary small" id="move-up">↑</button><button class="button secondary small" id="move-down">↓</button><button class="button secondary small" id="move-right">→</button><button class="button secondary small" id="remove-widget">移除</button></div></div>
    <button class="button primary full" id="save-editor">保存排版</button>
   </div>
  </section>
  <section class="activity"><div class="section-title"><h2>活动记录</h2><span>仅保存在本机</span></div><div id="logs" class="logs"></div></section>
  </div>
- <section class="preview-panel"><div class="section-title"><h2>墨水屏预览</h2><div class="preview-zoom-controls"><button class="button secondary small" id="preview-zoom-out" aria-label="缩小预览">−</button><output id="preview-zoom-value" aria-live="polite">100%</output><button class="button secondary small" id="preview-zoom-in" aria-label="放大预览">＋</button><button class="button secondary small" id="preview-fit">适应</button><button class="button secondary small" id="preview-actual">100%</button></div></div><div class="preview-surface" id="preview-viewport" tabindex="0" role="region" aria-label="墨水屏预览，点击后可用 Ctrl 加滚轮缩放"><div class="preview-stage"><div class="kindle-device"><div class="kindle-screen" id="kindle-preview"></div><div class="kindle-chin">kindle</div></div></div></div><div class="preview-zoom-help">点击画面后 Ctrl + 滚轮缩放 · 滚动查看细节</div><div class="preview-caption"><span id="preview-direction">PW5 · 竖屏</span><span id="preview-resolution">1236 × 1648 / 灰阶</span></div><div class="preview-footnote">电脑采样与墨水屏刷新独立运行。<br>未连接设备时，可先编辑、预览或导出。</div></section>
+ <section class="preview-panel"><div class="section-title"><h2>墨水屏预览 <span id="preview-widget-name"></span></h2><div class="preview-zoom-controls"><button class="button secondary small" id="preview-zoom-out" aria-label="缩小预览">−</button><output id="preview-zoom-value" aria-live="polite">100%</output><button class="button secondary small" id="preview-zoom-in" aria-label="放大预览">＋</button><button class="button secondary small" id="preview-fit">适应</button><button class="button secondary small" id="preview-actual">100%</button></div></div>
+ <div id="widget-typography" class="widget-typography hidden" role="group" aria-label="当前组件字体">
+  <label>字体<select id="widget-font-family"></select></label>
+  <label>粗细<select id="widget-font-weight"><option value="400">常规</option><option value="700">加粗</option><option value="">沿用原样</option></select></label>
+  <label>字号 <output id="widget-font-scale-value" for="widget-font-scale">100%</output><input id="widget-font-scale" type="range" step="1"></label>
+ </div>
+ <div class="preview-surface" id="preview-viewport" tabindex="0" role="region" aria-label="墨水屏预览，点击后可用 Ctrl 加滚轮缩放"><div class="preview-stage"><div class="kindle-device"><div class="kindle-screen" id="kindle-preview"></div><div class="kindle-chin">kindle</div></div></div></div><div class="preview-zoom-help">点击画面后 Ctrl + 滚轮缩放 · 滚动查看细节</div><div class="preview-caption"><span id="preview-direction">竖屏</span><span id="preview-resolution">灰阶</span></div><div class="preview-footnote">电脑采样与墨水屏刷新独立运行。<br>未连接设备时，可先编辑、预览或导出。</div></section>
  <section id="settings-panel" class="tab-panel hidden">
   <div class="settings-toolbar">
    <p>修改后点击「保存设置」应用。</p>
@@ -43,7 +51,13 @@
   <div class="settings-grid">
    <section class="editor-card settings-card">
     <h2>屏幕与显示</h2>
-    <label>摆放方向<select id="orientation"><option value="portrait">竖屏 · 1236 × 1648</option><option value="landscape">横屏 · 1648 × 1236</option></select></label><label id="landscape-placement" class="hidden">横放时，设备原来的顶部朝向<select id="landscape-top"><option value="left">左侧</option><option value="right">右侧</option></select></label><label>看板标题<input id="title" maxlength="48"></label><label>墨水屏字体<select id="font-weight"><option value="700">加粗 · 清晰醒目</option><option value="400">常规</option></select></label><label>底部留言<input id="note" maxlength="100"></label>
+    <label>Kindle 屏幕<select id="display-profile"></select></label>
+    <div id="custom-display" class="field-row hidden">
+     <label>竖屏宽度（px）<input id="display-width" type="number" min="300" max="4096" step="1"></label>
+     <label>竖屏高度（px）<input id="display-height" type="number" min="300" max="4096" step="1"></label>
+    </div>
+    <p class="help" id="display-help"></p>
+    <label>摆放方向<select id="orientation"><option value="portrait">竖屏</option><option value="landscape">横屏</option></select></label><label id="landscape-placement" class="hidden">横放时，设备原来的顶部朝向<select id="landscape-top"><option value="left">左侧</option><option value="right">右侧</option></select></label><label>看板标题<input id="title" maxlength="48"></label><label>底部留言<input id="note" maxlength="100"></label>
    </section>
    <section class="editor-card settings-card">
     <h2>采集与推送</h2>
@@ -56,7 +70,26 @@
    <section class="editor-card connection-card settings-card">
     <h2>Kindle 连接</h2>
     <label>同步方式<select id="connection-mode"><option value="http">看板插件 (HTTP)</option><option value="usb">USB 网络同步（SSH）</option><option value="wifi">Wi-Fi 无线同步（SSH）</option></select></label><p id="connection-help" class="help"></p><div id="http-fields"><div class="field-row"><label>Kindle 地址<input id="http-host" placeholder="看板屏幕上的 IP"></label><label class="port">端口<input type="number" id="http-port" min="1" max="65535"></label></div><label>配对口令<input id="http-token" placeholder="看板上的 8 位口令" autocomplete="off" spellcheck="false"></label></div><div id="ssh-fields" class="hidden"><div class="field-row"><label>USB 地址<input id="host" placeholder="192.168.15.244"></label><label class="port">端口<input type="number" id="port" min="1" max="65535"></label></div><label id="wifi-address-field">Kindle Wi-Fi 地址<input id="wifi-host" placeholder="如 192.168.1.123 或 kindle.local"></label><label>SSH 私钥（留空使用系统默认）<div class="field-row"><input id="identity-file" placeholder="默认 ~/.ssh/id_ed25519"><button class="button secondary small" id="choose-key">选择</button></div></label><label class="check-label" id="eips-field"><input type="checkbox" id="eips-refresh">推送后用 eips 刷屏</label><p id="eips-help" class="help">使用看板插件显示时请关闭。关闭后只原子替换图片，由插件自己刷新；开启时保持原来的 eips 全屏刷新。</p><p class="help">首次 SSH 连接需核对主机指纹，完成一次交互登录。应用使用已有 known_hosts，不自动信任陌生设备。</p></div>
-    <button class="button secondary" id="test">检测连接</button>
+    <p class="help" id="connection-status-detail"></p><button class="button secondary" id="test">检测连接</button>
+   </section>
+   <section class="editor-card settings-card">
+    <h2>AI 额度与余额</h2>
+    <p class="help">凭证使用 Windows 加密存储。查询直连平台，不经过项目服务器。未配置的平台不会显示在 Kindle 上。</p>
+    <label>平台<select id="usage-source"></select></label>
+    <label>账号<select id="usage-account"><option value="">新增账号</option></select></label>
+    <label>显示名称（可选）<input id="usage-label" maxlength="18" placeholder="例如个人、工作" autocomplete="off"></label>
+    <label id="usage-key-field"><span id="usage-key-label">API Key</span><input id="usage-key" type="password" maxlength="1024" autocomplete="off" spellcheck="false"></label>
+    <label id="usage-team-field" class="hidden">xAI Team ID<input id="usage-team" maxlength="128" autocomplete="off" spellcheck="false"></label>
+    <label id="usage-remaining-field" class="hidden"><span id="usage-remaining-label">剩余额度（%）</span><input id="usage-remaining" type="number" min="0" max="100" step="0.1"></label>
+    <label id="usage-reset-field" class="hidden">重置时间（可选）<input id="usage-reset" type="datetime-local"></label>
+    <p class="help" id="usage-description"></p>
+    <div class="usage-actions">
+     <button class="button secondary small" id="usage-save">保存来源</button>
+     <button class="button secondary small hidden" id="usage-local">使用本机</button>
+     <button class="button secondary small hidden" id="usage-remove">移除来源</button>
+     <button class="button secondary small" id="usage-refresh">立即查询</button>
+    </div>
+    <p class="help" id="usage-status" aria-live="polite"></p>
    </section>
    <section class="editor-card settings-card">
     <h2>天气</h2>

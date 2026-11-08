@@ -6,11 +6,11 @@ const {promisify}=require('node:util');
 const {randomUUID}=require('node:crypto');
 const {PNG}=require('pngjs');
 const {sanitize}=require('./model.cjs');
-const {screen}=require('./widgets.cjs');
+const {screen,displayFor,displaySize}=require('./widgets.cjs');
 const run=promisify(execFile);
 const options={windowsHide:true,timeout:20000,maxBuffer:512*1024};
-function readPage(buffer, config) {
-  const page=screen(config.orientation), image=PNG.sync.read(buffer,{checkCRC:true});
+function readPage(buffer, config, device) {
+  const page=screen(config.orientation,displayFor(config,device)), image=PNG.sync.read(buffer,{checkCRC:true});
   if(image.width!==page.width||image.height!==page.height||buffer[24]!==8||buffer[25]!==0)throw new Error(`图片必须是 ${page.width}×${page.height} 的 8-bit 灰阶 PNG`);
   return image;
 }
@@ -32,16 +32,16 @@ function rotateImage(buffer, image, turns) {
   }
   return PNG.sync.write(rotated,{colorType:0,inputColorType:6,bitDepth:8});
 }
-function deviceImage(buffer, config) {
-  return rotateImage(buffer, readPage(buffer, config), placementTurns(config));
+function deviceImage(buffer, config, device) {
+  return rotateImage(buffer, readPage(buffer, config, device), placementTurns(config));
 }
 // SSH + eips targets the native framebuffer. File-only SSH uploads keep the preview orientation.
 function wantsFramebuffer(config) {
   return config.connectionMode!=='http' && config.eipsRefresh!==false;
 }
-function payloadFor(buffer, config) {
-  if(!wantsFramebuffer(config)){readPage(buffer, config);return buffer;}
-  return deviceImage(buffer, config);
+function payloadFor(buffer, config, device) {
+  if(!wantsFramebuffer(config)){readPage(buffer, config, device);return buffer;}
+  return deviceImage(buffer, config, device);
 }
 function installCommand(temp, refresh) {
   if(!/^\/mnt\/us\/dashboard\.[A-Za-z0-9-]+\.tmp\.png$/.test(temp))throw new Error('临时文件名无效');
@@ -99,6 +99,7 @@ function httpRequest(spec) {
     const req=http.request({host:spec.host,port:spec.port,method:spec.method,path:spec.path,headers:spec.headers,timeout:spec.timeout||20000}, res=>{
       const chunks=[];
       res.on('data', chunk=>chunks.push(chunk));
+      res.on('error',fail);
       res.on('end', ()=>{if(settled)return;settled=true;resolve({status:res.statusCode,body:Buffer.concat(chunks).toString('utf8')});});
     });
     req.on('error', fail);
@@ -112,39 +113,60 @@ function parseStatus(body) {
   if(!parsed || parsed.ok!==true)throw new Error('看板插件没有接受这次请求');
   return parsed;
 }
+function sshDisplay(stdout) {
+  const text=String(stdout??'');
+  const x=text.match(/\bxres\s*[:=]\s*(\d+)/i)?.[1],y=text.match(/\byres\s*[:=]\s*(\d+)/i)?.[1];
+  const geometry=text.match(/^\s*geometry\s+(\d+)\s+(\d+)\s+/m);
+  return displaySize(Number(x),Number(y))??displaySize(Number(geometry?.[1]),Number(geometry?.[2]));
+}
+const dimensionsText=device=>device?`，屏幕 ${device.width}×${device.height}`:'';
 class Transport {
   constructor(execute=run, request=httpRequest) {this.execute=execute;this.request=request;this.busy=false;this.bin=path.join(process.env.SystemRoot||'C:\\Windows','System32','OpenSSH');}
   async test(config) {
     const c=sanitize(config);
     if(c.connectionMode==='http')return this.testHttp(c);
     const {args,target}=argsFor(c);
-    try {await this.execute(path.join(this.bin,'ssh.exe'),[...args,'-p',String(c.port),target,'test -d /mnt/us && test -w /mnt/us && command -v eips'],options);return {ok:true,message:'SSH 已连接，设备具备刷屏条件'};}
-    catch(error) {throw new Error(explain(error));}
+    const refresh=wantsFramebuffer(c);
+    const command='test -d /mnt/us && test -w /mnt/us'+(refresh?' && command -v eips >/dev/null':'')+
+      ' && { eips -i 2>/dev/null; fbset -s 2>/dev/null; true; }';
+    try {
+      const {stdout}=await this.execute(path.join(this.bin,'ssh.exe'),[...args,'-p',String(c.port),target,command],{...options,timeout:8000});
+      const device=sshDisplay(stdout);
+      return {ok:true,device,message:(refresh?'SSH 已连接，设备具备刷屏条件':'SSH 已连接，Kindle 存储可写')+dimensionsText(device)};
+    }catch(error){
+      if(error.code===1&&!String(error.stderr||'').trim()){
+        throw new Error(refresh?'SSH 已连接，但 Kindle 存储不可写或 eips 不可用。':'SSH 已连接，但 Kindle 存储不可写。');
+      }
+      throw new Error(explain(error));
+    }
   }
   async testHttp(config) {
-    const status=await this.readHttpStatus(config);
-    const size=status.width&&status.height?`，屏幕 ${status.width}×${status.height}`:'';
-    return {ok:true,message:`看板插件已连接${size}`};
+    const status=await this.readHttpStatus(config,5000);
+    const size=displaySize(status.width,status.height);
+    const model=typeof status.model==='string'&&/^[a-z0-9_-]{1,60}$/i.test(status.model)?status.model:null;
+    const device=size?{...size,model}:null;
+    return {ok:true,device,rotation:status.rotation,message:'看板插件已连接'+dimensionsText(device)};
   }
-  async readHttpStatus(config) {
+  async readHttpStatus(config,timeout=20000) {
     const spec=httpCall(config,'GET','/status',null);
+    spec.timeout=timeout;
     let response;
     try{response=await this.request(spec);}catch(error){throw httpFailure(error);}
     if(response.status!==200)throw new Error(explainHttp(response.status));
     return parseStatus(response.body);
   }
-  async push(config, pngPath) {
+  async push(config, pngPath, probe) {
     const c=sanitize(config);
-    if(c.connectionMode==='http')return this.pushHttp(c, pngPath);
-    return this.pushSsh(c, pngPath);
+    if(c.connectionMode==='http')return this.pushHttp(c, pngPath,probe);
+    return this.pushSsh(c, pngPath,probe);
   }
-  async pushHttp(config, pngPath) {
+  async pushHttp(config, pngPath, probe) {
     if(this.busy) throw new Error('上一轮推送仍在进行');
     this.busy=true;
     try {
       const buffer=await fs.readFile(pngPath);
-      const image=readPage(buffer,config);
-      const {rotation}=await this.readHttpStatus(config);
+      const {rotation,device}=probe??await this.testHttp(config);
+      const image=readPage(buffer,config,device);
       if(![0,1,2,3].includes(rotation))throw new Error('看板插件返回了无法识别的屏幕方向');
       // KOReader maps its logical coordinates to the native panel by -rotation quarter turns.
       const payload=rotateImage(buffer,image,(placementTurns(config)+rotation)%4);
@@ -156,7 +178,7 @@ class Transport {
       return {ok:true,message:'已通过看板插件更新图片'};
     } finally {this.busy=false;}
   }
-  async pushSsh(config, pngPath) {
+  async pushSsh(config, pngPath, probe) {
     if(this.busy) throw new Error('上一轮推送仍在进行');
     let uploadStarted=false;
     const {c,args,target}=argsFor(config),temp=`/mnt/us/dashboard.${randomUUID()}.tmp.png`;
@@ -166,10 +188,10 @@ class Transport {
     let uploadFile;
     try {
       const buffer=await fs.readFile(pngPath);
-      const native=payloadFor(buffer,c);
+      const {device}=probe??await this.test(c);
+      const native=payloadFor(buffer,c,device);
       uploadFile=path.join(path.dirname(pngPath),`.kindle-${randomUUID()}.png`);
       await fs.writeFile(uploadFile,native);
-      await this.test(c);
       uploadStarted=true;
       await this.execute(path.join(this.bin,'scp.exe'),[...args,'-O','-P',String(c.port),'./'+path.basename(uploadFile),`${target}:${temp}`],{...options,cwd:path.dirname(uploadFile),timeout:45000});
       // Upload to a unique temp name on the same filesystem, then rename over the live file.

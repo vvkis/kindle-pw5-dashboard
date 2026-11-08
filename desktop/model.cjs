@@ -14,12 +14,14 @@
   };
   const defaults = () => ({
     title: '工作站监控', note: '保持专注，保持冷静。',
-    host: '192.168.15.244', wifiHost: '', connectionMode: 'http', port: 22, identityFile: '', pushInterval: 60, fontWeight: 700,
+    host: '192.168.15.244', wifiHost: '', connectionMode: 'http', port: 22, identityFile: '', pushInterval: 60,
+    fontWeight: 700,
     httpHost: '', httpPort: 8686, httpToken: '', eipsRefresh: true,
     cpuSensor: '', sampleInterval: 3, layout: 'cards', showChart: true,
     weather: { name: '广州', latitude: 23.1291, longitude: 113.2644, enabled: true },
     widgets: Widgets.defaults(),
     orientation: 'portrait', landscapeTop: 'left',
+    displayProfile:'auto',displayWidth:1236,displayHeight:1648,
     layouts: {portrait:Widgets.defaults(),landscape:Widgets.defaults('landscape')},
     metrics: ['cpuTemp','gpuTemp','cpuLoad','gpuLoad','memoryLoad','gpuMemoryLoad'].map(key => ({ key, label: METRICS[key].label, enabled: true }))
   });
@@ -66,6 +68,12 @@
     if(input.orientation!==undefined&&!['portrait','landscape'].includes(input.orientation))throw new Error('无效的屏幕方向');
     if(input.landscapeTop!==undefined&&!['left','right'].includes(input.landscapeTop))throw new Error('无效的横屏摆放方向');
     out.orientation=input.orientation||'portrait';out.landscapeTop=input.landscapeTop||'left';
+    const profile=input.displayProfile??'auto';
+    if(typeof profile!=='string'||(!['auto','custom'].includes(profile)&&!Object.hasOwn(Widgets.DISPLAYS,profile)))throw new Error('无效的 Kindle 屏幕预设');
+    out.displayProfile=profile;
+    const custom=Widgets.displaySize(input.displayWidth,input.displayHeight);
+    if(profile==='custom'&&!custom)throw new Error('自定义尺寸的每边须为 300–4096 像素，总像素数不得超过 800 万');
+    if(custom){out.displayWidth=custom.width;out.displayHeight=custom.height;}
     for(const orientation of ['portrait','landscape']){
       if(input.layouts?.[orientation]!==undefined)out.layouts[orientation]=Widgets.validate(input.layouts[orientation],orientation);
     }
@@ -102,8 +110,15 @@
     if (current.length) segments.push(current);
     return segments.filter(s=>s.length>1).map(s=>`<polyline points="${s.join(' ')}" fill="none" stroke="#111" stroke-width="4"/>`).join('');
   }
-  function dashboardSvg(config, sample, history = [], weather = null) {
-    return Widgets.svg(sanitize(config),sample,history,weather);
+  function dashboardSvg(config, sample, history = [], weather = null, availableFonts, detected) {
+    return Widgets.svg(sanitize(config),sample,history,weather,availableFonts,detected);
   }
-  return { METRICS, defaults, sanitize, escape, number, format, dashboardSvg, sparkline };
+  function connectionKey(config) {
+    if(config.connectionMode==='http'){
+      return config.httpHost&&config.httpToken?JSON.stringify(['http',config.httpHost,config.httpPort,config.httpToken]):null;
+    }
+    const host=config.connectionMode==='wifi'?config.wifiHost:config.host;
+    return host?JSON.stringify([config.connectionMode,host,config.port,config.identityFile,config.eipsRefresh]):null;
+  }
+  return { METRICS, defaults, sanitize, escape, number, format, dashboardSvg, sparkline, connectionKey };
 });

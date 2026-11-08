@@ -94,6 +94,14 @@ local freed = 0
 local shown
 package.loaded["ui/uimanager"] = { show = function(_, spec) shown = spec end, close = function() end }
 package.loaded["ui/network/manager"] = { getNetworkInterfaceName = function() return "wlan0" end }
+package.loaded.device = {
+    model = "KindleScribe",
+    screen = {
+        getWidth = function() return 2480 end,
+        getHeight = function() return 1860 end,
+        getRotationMode = function() return 1 end,
+    },
+}
 package.loaded["ffi/netinfo"] = {
     new = function()
         return {
@@ -109,6 +117,9 @@ package.loaded.socket = {
 }
 local dashboard = require("main")
 table.remove(searchers, 1)
+eq(dashboard:_statusJson(), '{"ok":true,"version":"1","width":2480,"height":1860,"orientation":"landscape","rotation":1,"model":"KindleScribe"}', "report logical dimensions and model")
+package.loaded.device.model = 'bad"model'
+eq(dashboard:_statusJson():find('"model":""', 1, true) ~= nil, true, "ignore unsafe model IDs")
 function dashboard:port() return 8686 end
 function dashboard:pollSeconds() return 10 end
 function dashboard:token() return "K7MP4Q2R" end
